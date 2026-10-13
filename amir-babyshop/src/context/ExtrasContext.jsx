@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuth } from './AuthContext';
+import { SIZE_GUIDES } from '../data/sizeGuides';
 
 const ExtrasContext = createContext();
 export const useExtras = () => useContext(ExtrasContext);
@@ -11,7 +12,7 @@ const COUPONS_KEY       = 'amir_coupons';
 const RETURNS_KEY       = 'amir_returns';
 const NOTIFS_KEY        = 'amir_notifications';
 const APPLIED_KEY       = 'amir_applied_coupon';
-const STOCK_ALERTS_KEY  = 'amir_stock_alerts';   // 👈 NEW
+const STOCK_ALERTS_KEY  = 'amir_stock_alerts';
 
 /* ═══════════════════════════════════════════════════════════
    HELPERS
@@ -26,53 +27,6 @@ const safeParse = (raw, fallback) => {
 const userKey = (base, user) => {
   if (!user) return `${base}_guest`;
   return `${base}_${user.email?.toLowerCase() || user.id}`;
-};
-
-/* ═══════════════════════════════════════════════════════════
-   SIZE GUIDE — static data
-   ═══════════════════════════════════════════════════════════ */
-const SIZE_GUIDE = {
-  clothing: {
-    label: 'Clothing',
-    icon: '👕',
-    columns: ['Age', 'Height (cm)', 'Weight (kg)', 'Size'],
-    rows: [
-      ['0–3 months',  '50–60',   '3–6',    '0-3M'],
-      ['3–6 months',  '60–68',   '6–8',    '3-6M'],
-      ['6–12 months', '68–76',   '8–10',   '6-12M'],
-      ['12–18 months','76–82',   '10–11',  '12-18M'],
-      ['18–24 months','82–88',   '11–12',  '18-24M'],
-      ['2–3 years',   '88–96',   '12–14',  '2-3Y'],
-    ],
-    tips: 'When in doubt, size up — babies grow fast!',
-  },
-  shoes: {
-    label: 'Shoes',
-    icon: '👟',
-    columns: ['Age', 'Foot length (cm)', 'EU', 'UK', 'US'],
-    rows: [
-      ['0–3 months',  '8–9',    '16', '0',   '1'],
-      ['3–6 months',  '9–10',   '17', '1',   '2'],
-      ['6–12 months', '10–11',  '18', '2',   '3'],
-      ['12–18 months','11–12',  '19-20', '3-4', '4-5'],
-      ['18–24 months','12–13',  '21-22', '4-5', '5-6'],
-      ['2–3 years',   '13–14',  '23-24', '6-7', '7-8'],
-    ],
-    tips: 'Measure your baby\'s foot while standing for the best fit.',
-  },
-  hats: {
-    label: 'Hats & Caps',
-    icon: '🧢',
-    columns: ['Age', 'Head circumference (cm)', 'Size'],
-    rows: [
-      ['0–3 months',  '35–40',  'XS'],
-      ['3–6 months',  '40–44',  'S'],
-      ['6–12 months', '44–46',  'M'],
-      ['12–24 months','46–48',  'L'],
-      ['2–3 years',   '48–50',  'XL'],
-    ],
-    tips: 'A well-fitted hat should sit just above the eyebrows.',
-  },
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -235,29 +189,27 @@ export function ExtrasProvider({ children }) {
   };
 
   const updateReturnStatus = (id, status, extra = {}) => {
-  setReturns(prev => prev.map(r =>
-    r.id === id
-      ? {
-          ...r,
-          status,
-          // 🆕 Clear rejection reason if status is no longer 'rejected'
-          ...(status !== 'rejected' ? { rejectionReason: null } : {}),
-          ...extra,
-          updatedAt: new Date().toISOString(),
-        }
-      : r
-  ));
-};
+    setReturns(prev => prev.map(r =>
+      r.id === id
+        ? {
+            ...r,
+            status,
+            ...(status !== 'rejected' ? { rejectionReason: null } : {}),
+            ...extra,
+            updatedAt: new Date().toISOString(),
+          }
+        : r
+    ));
+  };
 
   const approveReturn  = (id) => updateReturnStatus(id, 'approved');
-const completeReturn = (id) => updateReturnStatus(id, 'completed');
+  const completeReturn = (id) => updateReturnStatus(id, 'completed');
 
-// 🆕 rejectReturn now accepts an optional reason
-const rejectReturn = (id, reason = '') => {
-  updateReturnStatus(id, 'rejected', {
-    rejectionReason: (reason || '').trim() || 'No reason provided',
-  });
-};
+  const rejectReturn = (id, reason = '') => {
+    updateReturnStatus(id, 'rejected', {
+      rejectionReason: (reason || '').trim() || 'No reason provided',
+    });
+  };
 
   const getMyReturns = (email) => {
     if (!email) return [];
@@ -328,13 +280,10 @@ const rejectReturn = (id, reason = '') => {
   /* ═══════════════════════════════════════════════════════════
      🔔 STOCK ALERTS (back-in-stock)
      ═══════════════════════════════════════════════════════════ */
-
-  /* Customer subscribes to be notified when a variant is back */
   const subscribeToStock = ({ productId, productName, size, color, email }) => {
     if (!email) return { ok: false, error: 'Email required' };
     const cleanEmail = email.trim().toLowerCase();
 
-    // Prevent duplicates
     const exists = stockAlerts.some(a =>
       a.productId === productId &&
       a.size === (size || null) &&
@@ -360,7 +309,6 @@ const rejectReturn = (id, reason = '') => {
     return { ok: true, alert };
   };
 
-  /* Count pending subscribers for a variant (for owner view) */
   const getSubscribersForVariant = (productId, size, color) => {
     return stockAlerts.filter(a =>
       a.productId === productId &&
@@ -370,7 +318,6 @@ const rejectReturn = (id, reason = '') => {
     ).length;
   };
 
-  /* When stock is restored, fire notifications for that variant */
   const notifyStockRestored = (productId, size, color, productName) => {
     const matching = stockAlerts.filter(a =>
       a.productId === productId &&
@@ -380,7 +327,6 @@ const rejectReturn = (id, reason = '') => {
     );
     if (matching.length === 0) return 0;
 
-    // Push notification to each subscriber
     matching.forEach(a => {
       notify(a.email, {
         type: 'info',
@@ -390,7 +336,6 @@ const rejectReturn = (id, reason = '') => {
       });
     });
 
-    // Mark them as notified
     const ids = new Set(matching.map(m => m.id));
     setStockAlerts(prev => prev.map(a =>
       ids.has(a.id) ? { ...a, notifiedAt: new Date().toISOString() } : a
@@ -399,7 +344,6 @@ const rejectReturn = (id, reason = '') => {
     return matching.length;
   };
 
-  /* Owner: see all pending (unnotified) alerts */
   const getPendingAlerts = () =>
     stockAlerts.filter(a => !a.notifiedAt);
 
@@ -418,8 +362,8 @@ const rejectReturn = (id, reason = '') => {
       requestReturn, approveReturn, rejectReturn, completeReturn,
       getMyReturns, getReturnById,
 
-      /* 📏 Size Guide (static) */
-      sizeGuide: SIZE_GUIDE,
+      /* 📏 Size Guide (static, from data file) */
+      sizeGuide: SIZE_GUIDES,
 
       /* 🔔 Notifications */
       notifications, notify,

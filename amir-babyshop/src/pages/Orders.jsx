@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   Search, CheckCircle2, Truck, XCircle, Clock, MapPin,
   Pencil, Trash2, X, Save, ChevronDown, Mail, Phone, CreditCard,
-  Printer,
+  Printer, Package,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useOrders, ORDER_STATUS } from '../context/OrderContext';
@@ -13,6 +13,14 @@ import { formatCurrency } from '../utils/format';
 import Skeleton from '../components/UI/Skeleton';
 import { useDelayedReady } from '../hooks/useDelayedReady';
 import InvoiceModal from '../components/Orders/InvoiceModal';
+import TrackingTimeline from '../components/Orders/TrackingTimeline';
+import {
+  CARRIERS,
+  generateTrackingNumber,
+  calculateETA,
+  formatETA,
+  getNextCheckpoint,
+} from '../utils/carrierHelpers';
 
 const STATUS_META = {
   pending:   { label: 'Pending',   cls: 'bg-amber-100 text-amber-800 border-amber-200' },
@@ -22,7 +30,7 @@ const STATUS_META = {
 };
 
 export default function Orders() {
-  const { orders, confirmOrder, fulfillOrder, cancelOrder, deleteOrder, updateOrder, counts } = useOrders();
+  const { orders, confirmOrder, fulfillOrder, cancelOrder, deleteOrder, updateOrder, addCheckpoint, counts } = useOrders();
   const { updateStock, products } = useInventory();
   const { isOwner, isSales } = useAuth();
   const { notify } = useExtras();
@@ -32,7 +40,8 @@ export default function Orders() {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(null);
-  const [invoicing, setInvoicing] = useState(null); // 🧾 order being invoiced
+  const [invoicing, setInvoicing] = useState(null);
+  const [confirmingOrder, setConfirmingOrder] = useState(null);
 
   const ready = useDelayedReady(400);
 
@@ -52,40 +61,74 @@ export default function Orders() {
   }, [orders, filter, query]);
 
   /* ═══════════════════════════════════════════════════════════
-     ACTIONS — with notifications
+     ACTIONS
      ═══════════════════════════════════════════════════════════ */
-  const handleConfirm = (order) => {
+  const handleConfirmClick = (order) => {
+    setConfirmingOrder(order);
+  };
+
+  const handleConfirmApply = ({ carrierId, carrierName, trackingNumber, eta }) => {
+    const order = confirmingOrder;
+    if (!order) return;
+
     order.items.forEach(item => {
       const product = products.find(p => p.id === item.id);
       if (product) {
         updateStock(product.id, Math.max(0, product.stock - item.qty));
       }
     });
-    confirmOrder(order.id);
+
+    confirmOrder(order.id, {
+      carrierId,
+      carrierName,
+      trackingNumber,
+      eta,
+    });
 
     if (order.customer?.email) {
       notify(order.customer.email, {
         type: 'order',
         title: `Order ${order.id} confirmed`,
-        body: `Great news! Your order has been confirmed and is being prepared for delivery.`,
+        body: `${carrierName} will deliver your order — estimated by ${formatETA(eta)}. Track it in My Orders.`,
         link: '/my-orders',
       });
     }
-    toast.success('Order confirmed', { icon: '✅' });
+
+    toast.success('Order confirmed with carrier assigned', { icon: '✅' });
+    setConfirmingOrder(null);
   };
 
-  const handleFulfill = (order) => {
-    fulfillOrder(order.id);
+  /* 🎯 Advance to next stage (replaces old handleFulfill) */
+  const handleAdvanceStage = (order) => {
+    const next = getNextCheckpoint(order.checkpoints || [], order.carrier);
+    if (!next) return;
 
-    if (order.customer?.email) {
-      notify(order.customer.email, {
-        type: 'order',
-        title: `Order ${order.id} is on its way!`,
-        body: `Your order has been fulfilled and is heading to you. Track it in My Orders.`,
-        link: '/my-orders',
-      });
+    /* Add the checkpoint */
+    addCheckpoint(order.id, next.type);
+
+    /* If final stage → also fulfill + notify */
+    if (next.isFinal) {
+      setTimeout(() => {
+        fulfillOrder(order.id);
+        if (order.customer?.email) {
+          const isCollected = next.type === 'collected';
+          notify(order.customer.email, {
+            type: 'order',
+            title: `Order ${order.id} ${isCollected ? 'collected' : 'delivered'}`,
+            body: isCollected
+              ? `Thank you for picking up your order! Hope you love it 💕`
+              : `Your order has arrived. Thank you for shopping with us!`,
+            link: '/my-orders',
+          });
+        }
+        toast.success(
+          `Order ${next.type === 'collected' ? 'collected' : 'delivered'}`,
+          { icon: '🎉' }
+        );
+      }, 100);
+    } else {
+      toast.success(`Marked as ${next.label}`, { icon: next.icon });
     }
-    toast.success('Order fulfilled', { icon: '🚚' });
   };
 
   const handleCancel = (order) => {
@@ -176,6 +219,12 @@ export default function Orders() {
               o.status === ORDER_STATUS.PENDING || o.status === ORDER_STATUS.CONFIRMED;
             const isOpen = expanded === o.id;
 
+            /* Determine next step button for confirmed orders */
+            const nextStep =
+              o.status === ORDER_STATUS.CONFIRMED
+                ? getNextCheckpoint(o.checkpoints || [], o.carrier)
+                : null;
+
             return (
               <div key={o.id} className="card overflow-hidden">
 
@@ -245,6 +294,23 @@ export default function Orders() {
                       </p>
                     </div>
                   </div>
+
+                  {o.trackingNumber && (
+                    <div className="mt-2 pt-2 border-t border-amir-dark/5 flex items-center gap-2 text-[10px] font-semibold">
+                      <Truck size={11} className="text-blue-600 shrink-0" />
+                      <span className="text-amir-dark/70 truncate">
+                        {o.carrierName} · <span className="font-mono">{o.trackingNumber}</span>
+                      </span>
+                      {o.eta && (
+                        <>
+                          <span className="text-amir-dark/30">·</span>
+                          <span className="text-amir-dark/60 shrink-0">
+                            ETA {formatETA(o.eta)}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </button>
 
                 {isOpen && (
@@ -273,6 +339,19 @@ export default function Orders() {
                         hour: '2-digit', minute: '2-digit',
                       })}
                     </p>
+
+                    {/* Tracking section */}
+                    {o.trackingNumber && o.checkpoints?.length > 0 && (
+                      <div className="bg-white rounded-xl p-3 border border-amir-dark/5 mb-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/50 mb-2 flex items-center gap-1.5">
+                          <Package size={11} /> Tracking · {o.carrierName}
+                        </p>
+                        <p className="text-[10px] text-amir-dark/50 font-mono font-bold mb-3">
+                          {o.trackingNumber}
+                        </p>
+                        <TrackingTimeline checkpoints={o.checkpoints} carrierId={o.carrier} />
+                      </div>
+                    )}
 
                     <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/50 mb-2">
                       Items ({o.items.length})
@@ -364,7 +443,6 @@ export default function Orders() {
                       )}
                     </div>
 
-                    {/* 🧾 Print invoice */}
                     <button
                       type="button"
                       onClick={() => setInvoicing(o)}
@@ -373,24 +451,27 @@ export default function Orders() {
                       <Printer size={14} /> Print invoice
                     </button>
 
+                    {/* ═══ ACTION BUTTONS ═══ */}
                     {isActionable && (
                       <div className="flex gap-1.5 mt-3 pt-3 border-t border-amir-dark/10">
                         {o.status === ORDER_STATUS.PENDING && (
                           <button
-                            onClick={() => handleConfirm(o)}
+                            onClick={() => handleConfirmClick(o)}
                             className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-3 rounded-full text-xs transition-all active:scale-95 inline-flex items-center justify-center gap-1.5"
                           >
                             <CheckCircle2 size={14} /> Confirm order
                           </button>
                         )}
-                        {o.status === ORDER_STATUS.CONFIRMED && (
+
+                        {o.status === ORDER_STATUS.CONFIRMED && nextStep && (
                           <button
-                            onClick={() => handleFulfill(o)}
+                            onClick={() => handleAdvanceStage(o)}
                             className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 px-3 rounded-full text-xs transition-all active:scale-95 inline-flex items-center justify-center gap-1.5"
                           >
-                            <Truck size={14} /> Fulfill order
+                            <Truck size={14} /> {nextStep.buttonLabel}
                           </button>
                         )}
+
                         <button
                           onClick={() => handleCancel(o)}
                           className="px-3 py-2 rounded-full text-xs font-bold text-rose-600 hover:bg-rose-50 transition-colors"
@@ -416,7 +497,6 @@ export default function Orders() {
         </div>
       )}
 
-      {/* Edit modal */}
       {editing && (
         <EditOrderModal
           order={editing}
@@ -428,7 +508,6 @@ export default function Orders() {
         />
       )}
 
-      {/* 🧾 Invoice modal */}
       {invoicing && (
         <InvoiceModal
           order={invoicing}
@@ -436,6 +515,150 @@ export default function Orders() {
           onClose={() => setInvoicing(null)}
         />
       )}
+
+      {confirmingOrder && (
+        <ConfirmCarrierModal
+          order={confirmingOrder}
+          onClose={() => setConfirmingOrder(null)}
+          onConfirm={handleConfirmApply}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   🚚 CONFIRM CARRIER MODAL
+   ═══════════════════════════════════════════════════════════ */
+function ConfirmCarrierModal({ order, onClose, onConfirm }) {
+  const [carrierId, setCarrierId] = useState('g4s');
+  const [trackingNumber, setTrackingNumber] = useState(() => generateTrackingNumber('g4s'));
+  const [eta, setEta] = useState(() => calculateETA('g4s').slice(0, 10));
+
+  const handleCarrierChange = (id) => {
+    setCarrierId(id);
+    setTrackingNumber(generateTrackingNumber(id));
+    setEta(calculateETA(id).slice(0, 10));
+  };
+
+  const handleRegenerate = () => {
+    setTrackingNumber(generateTrackingNumber(carrierId));
+  };
+
+  const submit = (e) => {
+    e.preventDefault();
+    const carrier = CARRIERS.find(c => c.id === carrierId);
+    if (!carrier) return;
+
+    onConfirm({
+      carrierId,
+      carrierName: carrier.name,
+      trackingNumber: trackingNumber.trim(),
+      eta: new Date(eta).toISOString(),
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+
+      <div className="relative w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl max-h-[90vh] overflow-y-auto">
+
+        <div className="sticky top-0 bg-white border-b border-amir-dark/5 p-4 flex items-center justify-between">
+          <div className="min-w-0">
+            <p className="font-black text-base flex items-center gap-2">
+              <Truck size={16} className="text-blue-600" />
+              Confirm & assign carrier
+            </p>
+            <p className="text-[11px] font-mono text-amir-dark/50 truncate">{order.id}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="btn-icon w-9 h-9 hover:bg-rose-50 text-gray-400 hover:text-rose-500 shrink-0"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="p-4 space-y-4">
+
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-amir-dark/60 mb-1.5">
+              Courier
+            </label>
+            <select
+              value={carrierId}
+              onChange={e => handleCarrierChange(e.target.value)}
+              className="input"
+            >
+              {CARRIERS.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-amir-dark/50 font-semibold mt-1">
+              Typical delivery: {CARRIERS.find(c => c.id === carrierId)?.avgDays ?? '—'} day{(CARRIERS.find(c => c.id === carrierId)?.avgDays ?? 0) !== 1 ? 's' : ''}
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-amir-dark/60 mb-1.5">
+              Tracking number
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                required
+                value={trackingNumber}
+                onChange={e => setTrackingNumber(e.target.value.toUpperCase())}
+                className="input flex-1 font-mono"
+                placeholder="G4S-2026-XXXXXXXX"
+              />
+              <button
+                type="button"
+                onClick={handleRegenerate}
+                className="px-3 py-2 rounded-lg bg-white border border-gray-200 hover:border-amir-pink text-amir-dark font-bold text-xs transition-colors shrink-0"
+                title="Generate new"
+              >
+                🔄
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-amir-dark/60 mb-1.5">
+              Estimated delivery
+            </label>
+            <input
+              type="date"
+              required
+              value={eta}
+              onChange={e => setEta(e.target.value)}
+              className="input"
+            />
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+            <p className="text-[11px] text-blue-800 font-semibold leading-relaxed">
+              ℹ️ This will:
+            </p>
+            <ul className="text-[10px] text-blue-700 space-y-0.5 mt-1 ml-3 list-disc">
+              <li>Mark the order as confirmed</li>
+              <li>Deduct stock for all items</li>
+              <li>Attach carrier + tracking info</li>
+              <li>Notify the customer</li>
+            </ul>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1 py-3">
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary flex-1 py-3">
+              <CheckCircle2 size={16} /> Confirm & assign
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

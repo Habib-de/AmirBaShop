@@ -1,14 +1,16 @@
 import { useMemo, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Package, RefreshCw, ChevronDown, MapPin, RotateCcw, CheckCircle2, Printer } from 'lucide-react';
+import { Package, RefreshCw, ChevronDown, MapPin, RotateCcw, CheckCircle2, Printer, Truck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useOrders } from '../context/OrderContext';
 import { useAuth } from '../context/AuthContext';
 import { useExtras } from '../context/ExtrasContext';
 import { formatCurrency } from '../utils/format';
 import OrderTimeline from '../components/Orders/OrderTimeline';
+import TrackingTimeline from '../components/Orders/TrackingTimeline';
 import ReturnModal from '../components/Orders/ReturnModal';
 import InvoiceModal from '../components/Orders/InvoiceModal';
+import { formatETA, daysUntilETA } from '../utils/carrierHelpers';
 
 const STATUS_META = {
   pending:   { label: 'Pending',   cls: 'bg-amber-100 text-amber-800' },
@@ -24,8 +26,8 @@ export default function MyOrders() {
 
   const [expanded, setExpanded] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [requesting, setRequesting] = useState(null); // order being returned
-  const [invoicing, setInvoicing] = useState(null);   // order being invoiced
+  const [requesting, setRequesting] = useState(null);
+  const [invoicing, setInvoicing] = useState(null);
 
   const myOrders = useMemo(() => {
     if (!user) return [];
@@ -67,7 +69,6 @@ export default function MyOrders() {
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 pb-8">
 
-      {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-5">
         <div className="min-w-0">
           <h1 className="text-2xl sm:text-3xl font-black">My orders</h1>
@@ -85,7 +86,6 @@ export default function MyOrders() {
         </button>
       </div>
 
-      {/* Updates banner */}
       {unseenCount > 0 && (
         <div className="mb-4 flex items-center gap-2.5 p-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-md animate-fade-in">
           <span className="relative shrink-0">
@@ -105,7 +105,6 @@ export default function MyOrders() {
         </div>
       )}
 
-      {/* Empty state */}
       {myOrders.length === 0 ? (
         <div className="card p-12 text-center">
           <div className="text-5xl mb-3">📦</div>
@@ -123,10 +122,22 @@ export default function MyOrders() {
             const canReturn = o.status === 'fulfilled';
             const alreadyReturned = hasReturned(o.id);
 
+            const etaDays = o.eta ? daysUntilETA(o.eta) : null;
+const isDone = o.status === 'fulfilled';
+const isPickup = o.carrier === 'pickup-store';
+
+const etaHint =
+  isDone
+    ? (isPickup ? 'Collected' : 'Delivered')
+    : etaDays === null ? ''
+    : etaDays < 0     ? (isPickup ? 'Collected' : 'Delivered')
+    : etaDays === 0   ? 'Arriving today'
+    : etaDays === 1   ? 'Arriving tomorrow'
+    :                   `Arriving in ${etaDays} days`;
+
             return (
               <div key={o.id} className="card overflow-hidden">
 
-                {/* Header */}
                 <button
                   onClick={() => setExpanded(isOpen ? null : o.id)}
                   className="w-full text-left p-3 sm:p-4 active:bg-amir-cream/40 transition-colors"
@@ -154,6 +165,36 @@ export default function MyOrders() {
 
                   <OrderTimeline status={o.status} compact />
 
+                  {o.trackingNumber && (
+                    <div className="mt-3 pt-3 border-t border-amir-dark/5">
+                      <div className="flex items-center gap-2">
+                        <span className="w-7 h-7 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                          <Truck size={13} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-bold text-amir-dark truncate">
+                            {o.carrierName}
+                          </p>
+                          <p className="text-[10px] text-amir-dark/60 font-mono font-semibold truncate">
+                            {o.trackingNumber}
+                          </p>
+                        </div>
+                        {o.eta && (
+                          <div className="text-right shrink-0">
+                            <p className="text-[10px] font-bold text-blue-700">
+                              {formatETA(o.eta)}
+                            </p>
+                            {etaHint && (
+                              <p className="text-[9px] text-amir-dark/50 font-semibold">
+                                {etaHint}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between gap-2 mt-3 pt-2 border-t border-amir-dark/5">
                     <div className="flex gap-1">
                       {o.items.slice(0, 4).map((it, i) => (
@@ -180,7 +221,6 @@ export default function MyOrders() {
                   </div>
                 </button>
 
-                {/* Expanded detail panel */}
                 {isOpen && (
                   <div className="border-t border-amir-dark/5 p-3 sm:p-4 bg-amir-cream/30 animate-fade-in space-y-4">
 
@@ -190,6 +230,27 @@ export default function MyOrders() {
                       </p>
                       <OrderTimeline status={o.status} />
                     </div>
+
+                    {o.trackingNumber && o.checkpoints?.length > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/50 flex items-center gap-1.5">
+                            <Truck size={11} /> Tracking · {o.carrierName}
+                          </p>
+                          {o.eta && (
+                            <p className="text-[10px] font-bold text-blue-700">
+                              ETA {formatETA(o.eta)}
+                            </p>
+                          )}
+                        </div>
+                        <div className="bg-white rounded-xl p-3 border border-amir-dark/5">
+                          <p className="text-[10px] font-mono font-bold text-amir-dark/60 mb-3">
+                            {o.trackingNumber}
+                          </p>
+                          <TrackingTimeline checkpoints={o.checkpoints} carrierId={o.carrier} />
+                        </div>
+                      </div>
+                    )}
 
                     <div>
                       <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/50 mb-2">
@@ -244,7 +305,6 @@ export default function MyOrders() {
                       <span className="font-black text-base">{formatCurrency(o.total)}</span>
                     </div>
 
-                    {/* 🧾 Print receipt */}
                     <button
                       type="button"
                       onClick={() => setInvoicing(o)}
@@ -253,7 +313,6 @@ export default function MyOrders() {
                       <Printer size={16} /> Print receipt
                     </button>
 
-                    {/* 📦 Return section (fulfilled orders only) */}
                     {canReturn && (
                       <div className="pt-2 border-t border-amir-dark/10">
                         {alreadyReturned ? (
@@ -290,7 +349,6 @@ export default function MyOrders() {
         </div>
       )}
 
-      {/* 📦 Return modal */}
       {requesting && (
         <ReturnModal
           order={requesting}
@@ -302,7 +360,6 @@ export default function MyOrders() {
         />
       )}
 
-      {/* 🧾 Invoice / Receipt modal */}
       {invoicing && (
         <InvoiceModal
           order={invoicing}

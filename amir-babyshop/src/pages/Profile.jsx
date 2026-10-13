@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   User, Mail, Phone, Lock, Eye, EyeOff, Save, X,
   AlertCircle, CheckCircle2, Shield, Store, LogOut,
-  Pencil, KeyRound,
+  Pencil, KeyRound, Baby, ChevronRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
@@ -32,6 +32,7 @@ export default function Profile() {
   }[user.role] || { label: 'User', cls: 'bg-gray-100 text-gray-700' };
 
   const myTenant = tenants.find(t => t.id === user.tenantId);
+  const isCustomer = user.role === 'customer';
 
   const handleLogout = () => {
     logout();
@@ -81,6 +82,25 @@ export default function Profile() {
           </div>
         </div>
       </div>
+
+      {/* 🍼 Baby Registry quick access — customers only */}
+      {isCustomer && (
+        <Link
+          to="/my-registry"
+          className="card p-4 mb-5 flex items-center gap-3 hover:border-amir-pink transition-colors active:scale-[0.99]"
+        >
+          <span className="w-12 h-12 rounded-full bg-pink-50 text-pink-600 flex items-center justify-center text-xl shrink-0">
+            🍼
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-sm text-gray-900">My Baby Registry</p>
+            <p className="text-[11px] text-gray-500">
+              Create a registry, share with friends & track gifts
+            </p>
+          </div>
+          <ChevronRight size={18} className="text-gray-400 shrink-0" />
+        </Link>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1.5 mb-4">
@@ -183,7 +203,6 @@ function InfoForm({ user, onSave }) {
   return (
     <form onSubmit={handleSubmit} className="card p-5 space-y-4">
 
-      {/* Name */}
       <div>
         <label className="block text-xs font-bold text-gray-700 mb-1.5">
           Full Name
@@ -200,7 +219,6 @@ function InfoForm({ user, onSave }) {
         </div>
       </div>
 
-      {/* Email */}
       <div>
         <label className="block text-xs font-bold text-gray-700 mb-1.5">
           Email Address
@@ -220,7 +238,6 @@ function InfoForm({ user, onSave }) {
         </p>
       </div>
 
-      {/* Phone */}
       <div>
         <label className="block text-xs font-bold text-gray-700 mb-1.5">
           Phone Number
@@ -281,7 +298,6 @@ function PasswordForm({ onSubmit }) {
       return;
     }
 
-    // Reset form on success
     setCurrent('');
     setNewPwd('');
     setConfirm('');

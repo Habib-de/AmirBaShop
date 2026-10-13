@@ -1,7 +1,9 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
-import { ThemeProvider } from './context/ThemeContext';   // 👈 NEW
+import { ThemeProvider } from './context/ThemeContext';
+import { CurrencyProvider, useCurrency } from './context/CurrencyContext';
 import { CartProvider } from './context/CartContext';
 import { WishlistProvider } from './context/WishlistContext';
 import { ReviewsProvider } from './context/ReviewsContext';
@@ -9,6 +11,7 @@ import { ExtrasProvider } from './context/ExtrasContext';
 import { InventoryProvider } from './context/InventoryContext';
 import { OrderProvider } from './context/OrderContext';
 import { FeedbackProvider } from './context/FeedbackContext';
+import { RegistryProvider } from './context/RegistryContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import ShopLayout from './components/Layout/ShopLayout';
 import AuthLayout from './components/Layout/AuthLayout';
@@ -24,6 +27,7 @@ import Orders from './pages/Orders';
 import Inventory from './pages/Inventory';
 import Team from './pages/Team';
 import Admin from './pages/Admin';
+import Analytics from './pages/Analytics';
 import Profile from './pages/Profile';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -31,20 +35,25 @@ import ForgotPassword from './pages/ForgotPassword';
 import Wishlist from './pages/Wishlist';
 import Coupons from './pages/Coupons';
 import Returns from './pages/Returns';
-import StaffReturns from './pages/StaffReturns'; 
+import StaffReturns from './pages/StaffReturns';
 import Notifications from './pages/Notifications';
+import Registry from './pages/Registry';
+import MyRegistry from './pages/MyRegistry';
+import RegistryView from './pages/RegistryView';
 
-export default function App() {
+function AppContent() {
+  const { currency } = useCurrency();
+
   return (
-    <AuthProvider>
-      <ThemeProvider>                                       {/* 👈 NEW */}
-        <FeedbackProvider>
-          <InventoryProvider>
-            <CartProvider>
-              <WishlistProvider>
-                <ReviewsProvider>
-                  <ExtrasProvider>
-                    <OrderProvider>
+    <div key={currency}>
+      <FeedbackProvider>
+        <InventoryProvider>
+          <CartProvider>
+            <WishlistProvider>
+              <ReviewsProvider>
+                <ExtrasProvider>
+                  <OrderProvider>
+                    <RegistryProvider>
                       <BrowserRouter>
                         <Routes>
                           {/* Auth pages — no header/footer */}
@@ -67,16 +76,28 @@ export default function App() {
                             <Route path="/profile"      element={<Profile />} />
                             <Route path="/wishlist"     element={<Wishlist />} />
 
-                            <Route path="/coupons" element={<ProtectedRoute allowedRoles={['owner']}><Coupons /></ProtectedRoute>} />
+                            {/* 🍼 Baby Registry */}
+                            <Route path="/registry"          element={<Registry />} />
+                            <Route path="/my-registry"       element={<MyRegistry />} />
+                            <Route path="/registry/:slug"    element={<RegistryView />} />
+
+                            <Route
+                              path="/coupons"
+                              element={
+                                <ProtectedRoute allowedRoles={['owner']}>
+                                  <Coupons />
+                                </ProtectedRoute>
+                              }
+                            />
                             <Route path="/returns" element={<Returns />} />
                             <Route
-  path="/staff/returns"
-  element={
-    <ProtectedRoute allowedRoles={['owner', 'sales']}>
-      <StaffReturns />
-    </ProtectedRoute>
-  }
-/>
+                              path="/staff/returns"
+                              element={
+                                <ProtectedRoute allowedRoles={['owner', 'sales']}>
+                                  <StaffReturns />
+                                </ProtectedRoute>
+                              }
+                            />
                             <Route path="/notifications" element={<Notifications />} />
 
                             <Route
@@ -111,10 +132,17 @@ export default function App() {
                                 </ProtectedRoute>
                               }
                             />
+                            <Route
+                              path="/analytics"
+                              element={
+                                <ProtectedRoute allowedRoles={['owner']}>
+                                  <Analytics />
+                                </ProtectedRoute>
+                              }
+                            />
                           </Route>
                         </Routes>
 
-                        {/* Global toast notifications */}
                         <Toaster
                           position="top-center"
                           toastOptions={{
@@ -139,14 +167,28 @@ export default function App() {
                           }}
                         />
                       </BrowserRouter>
-                    </OrderProvider>
-                  </ExtrasProvider>
-                </ReviewsProvider>
-              </WishlistProvider>
-            </CartProvider>
-          </InventoryProvider>
-        </FeedbackProvider>
-      </ThemeProvider>                                       {/* 👈 NEW */}
-    </AuthProvider>
+                    </RegistryProvider>
+                  </OrderProvider>
+                </ExtrasProvider>
+              </ReviewsProvider>
+            </WishlistProvider>
+          </CartProvider>
+        </InventoryProvider>
+      </FeedbackProvider>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <HelmetProvider>
+      <AuthProvider>
+        <ThemeProvider>
+          <CurrencyProvider>
+            <AppContent />
+          </CurrencyProvider>
+        </ThemeProvider>
+      </AuthProvider>
+    </HelmetProvider>
   );
 }

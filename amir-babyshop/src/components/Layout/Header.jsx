@@ -6,11 +6,13 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import Logo from '../UI/Logo';
+import CurrencyToggle from '../UI/CurrencyToggle';   // 👈 NEW
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
 import { useAuth } from '../../context/AuthContext';
 import { useExtras } from '../../context/ExtrasContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useCurrency } from '../../context/CurrencyContext';   // 👈 NEW
 
 const NOTIF_META = {
   order:   { icon: Package, color: 'text-blue-600',   bg: 'bg-blue-50' },
@@ -30,6 +32,7 @@ export default function Header() {
   const { user, logout, isStaff, isOwner } = useAuth();
   const { getUnreadNotifCount, getMyNotifs, markNotifRead } = useExtras();
   const { isDark, toggleTheme } = useTheme();
+  const { currency, toggle: toggleCurrency } = useCurrency();   // 👈 NEW
 
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -313,7 +316,18 @@ export default function Header() {
                           )}
                         </Link>
 
-                        {/* 🌙 Dark mode toggle — moved here */}
+                        {/* 💱 Currency toggle (logged in) */}
+                        <button
+                          onClick={toggleCurrency}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-amir-pink/20 font-bold text-sm transition-colors"
+                        >
+                          💱 {currency}
+                          <span className="ml-auto text-[10px] text-amir-dark/50 font-semibold">
+                            switch
+                          </span>
+                        </button>
+
+                        {/* 🌙 Dark mode toggle */}
                         <button
                           onClick={toggleTheme}
                           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-100 font-bold text-sm transition-colors"
@@ -334,6 +348,9 @@ export default function Header() {
                 </div>
               ) : (
                 <>
+                  {/* 💱 Currency toggle (guest) — desktop */}
+                  <CurrencyToggle variant="pill" />
+
                   {/* 🌙 Dark mode toggle for guests (no login) */}
                   <button
                     type="button"
@@ -439,6 +456,9 @@ export default function Header() {
                       </Link>
                     )}
 
+                    {/* 💱 Currency toggle (mobile drawer, logged in) */}
+                    <CurrencyToggle variant="row" />
+
                     {/* 🌙 Theme toggle in mobile drawer (logged in) */}
                     <button
                       onClick={() => {
@@ -485,6 +505,9 @@ export default function Header() {
                         </span>
                       )}
                     </Link>
+
+                    {/* 💱 Currency toggle (mobile drawer, guest) */}
+                    <CurrencyToggle variant="row" />
 
                     {/* 🌙 Theme toggle in mobile drawer (guest) */}
                     <button

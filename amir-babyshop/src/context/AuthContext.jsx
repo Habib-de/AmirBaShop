@@ -3,48 +3,72 @@ import { createContext, useContext, useEffect, useState } from 'react';
 const AuthContext = createContext();
 export const useAuth = () => useContext(AuthContext);
 
-const USERS_KEY = 'amir_users';
-const TENANTS_KEY = 'amir_tenants';
+const USERS_KEY    = 'amir_users';
+const TENANTS_KEY  = 'amir_tenants';
+const SESSION_KEY  = 'amir_user';
 
-/* ─── Blank seed — register your first owner to start ─── */
 const DEFAULT_USERS = [];
 const DEFAULT_TENANTS = [];
 
+/* ─── Safe read helper ─── */
+function safeReadArray(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return { ok: true, data: [] };
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return { ok: false, data: [] };
+    return { ok: true, data: parsed };
+  } catch (err) {
+    console.warn(`[Auth] Failed to read ${key}:`, err);
+    return { ok: false, data: [] };
+  }
+}
+
 export function AuthProvider({ children }) {
+  /* ─── Current session user ─── */
   const [user, setUser] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem('amir_user')) || null;
+      return JSON.parse(localStorage.getItem(SESSION_KEY)) || null;
     } catch { return null; }
   });
 
-  const [users, setUsers] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(USERS_KEY));
-      return Array.isArray(saved) ? saved : DEFAULT_USERS;
-    } catch { return DEFAULT_USERS; }
-  });
+  /* ─── Data + hydration flag ─── */
+  const [users, setUsers] = useState(DEFAULT_USERS);
+  const [tenants, setTenants] = useState(DEFAULT_TENANTS);
+  const [hydrated, setHydrated] = useState(false);
 
-  const [tenants, setTenants] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(TENANTS_KEY));
-      return Array.isArray(saved) ? saved : DEFAULT_TENANTS;
-    } catch { return DEFAULT_TENANTS; }
-  });
+  /* ═══ INITIAL LOAD (runs once — StrictMode safe) ═══ */
+  useEffect(() => {
+    const u = safeReadArray(USERS_KEY);
+    const t = safeReadArray(TENANTS_KEY);
+
+    if (u.ok) setUsers(u.data);
+    else console.warn('[Auth] users read failed — skipping load to protect data');
+
+    if (t.ok) setTenants(t.data);
+    else console.warn('[Auth] tenants read failed — skipping load to protect data');
+
+    setHydrated(true);
+  }, []);
+
+  /* ═══ PERSIST (only after hydration) ═══ */
+  useEffect(() => {
+    if (!hydrated) return;
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+  }, [users, hydrated]);
 
   useEffect(() => {
-    if (user) localStorage.setItem('amir_user', JSON.stringify(user));
-    else localStorage.removeItem('amir_user');
+    if (!hydrated) return;
+    localStorage.setItem(TENANTS_KEY, JSON.stringify(tenants));
+  }, [tenants, hydrated]);
+
+  /* ═══ SESSION PERSIST ═══ */
+  useEffect(() => {
+    if (user) localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    else localStorage.removeItem(SESSION_KEY);
   }, [user]);
 
-  useEffect(() => {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  }, [users]);
-
-  useEffect(() => {
-    localStorage.setItem(TENANTS_KEY, JSON.stringify(tenants));
-  }, [tenants]);
-
-  /* ─── LOGIN ─── */
+  /* ═══ LOGIN ═══ */
   const login = (email, password) => {
     const found = users.find(
       u => u.email.toLowerCase() === email.toLowerCase() && u.password === password
@@ -52,16 +76,10 @@ export function AuthProvider({ children }) {
     if (!found) return { ok: false, error: 'Invalid email or password' };
 
     if (found.status === 'pending') {
-      return {
-        ok: false,
-        error: '⏳ Your account is pending owner approval. Please wait to be activated.',
-      };
+      return { ok: false, error: '⏳ Your account is pending owner approval. Please wait to be activated.' };
     }
     if (found.status === 'rejected') {
-      return {
-        ok: false,
-        error: '❌ Your registration was rejected. Please contact the shop owner.',
-      };
+      return { ok: false, error: '❌ Your registration was rejected. Please contact the shop owner.' };
     }
 
     const { password: _, ...safe } = found;
@@ -69,7 +87,7 @@ export function AuthProvider({ children }) {
     return { ok: true, user: safe };
   };
 
-  /* ─── REGISTER — role-based ─── */
+  /* ═══ REGISTER ═══ */
   const register = ({ name, email, password, role = 'customer', shopName, tenantId }) => {
     const cleanEmail = email.trim().toLowerCase();
 
@@ -81,9 +99,8 @@ export function AuthProvider({ children }) {
     let finalTenantId = null;
 
     if (role === 'owner') {
-      if (!shopName?.trim()) {
-        return { ok: false, error: 'Shop name is required.' };
-      }
+      if (!shopName?.trim()) return { ok: false, error: 'Shop name is required.' };
+
       const slug = shopName.trim().toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '')
@@ -97,7 +114,6 @@ export function AuthProvider({ children }) {
       finalTenantId = slug;
       status = 'active';
     }
-
     else if (role === 'sales') {
       if (!tenantId) return { ok: false, error: 'Please choose the shop you want to join.' };
       if (!tenants.some(t => t.id === tenantId)) {
@@ -106,7 +122,6 @@ export function AuthProvider({ children }) {
       finalTenantId = tenantId;
       status = 'pending';
     }
-
     else {
       if (!tenantId) return { ok: false, error: 'Please choose the shop you are shopping at.' };
       if (!tenants.some(t => t.id === tenantId)) {
@@ -129,14 +144,10 @@ export function AuthProvider({ children }) {
 
     setUsers(prev => [...prev, newUser]);
 
-    return {
-      ok: true,
-      user: newUser,
-      requiresApproval: status === 'pending',
-    };
+    return { ok: true, user: newUser, requiresApproval: status === 'pending' };
   };
 
-  /* ─── OWNER: approve/reject pending staff ─── */
+  /* ═══ APPROVE / REJECT / DELETE ═══ */
   const approveUser = (id) => {
     setUsers(prev => prev.map(u =>
       u.id === id ? { ...u, status: 'active', approvedAt: new Date().toISOString() } : u
@@ -151,13 +162,13 @@ export function AuthProvider({ children }) {
 
   const deleteUser = (id) => setUsers(prev => prev.filter(u => u.id !== id));
 
-  /* ─── UPDATE USER (name, email, phone) ─── */
+  /* ═══ UPDATE ═══ */
   const updateUser = (id, patch) => {
     setUsers(prev => prev.map(u => u.id === id ? { ...u, ...patch } : u));
     setUser(prev => (prev && prev.id === id ? { ...prev, ...patch } : prev));
   };
 
-  /* ─── CHANGE PASSWORD ─── */
+  /* ═══ CHANGE PASSWORD ═══ */
   const changePassword = (id, currentPassword, newPassword) => {
     const target = users.find(u => u.id === id);
     if (!target) return { ok: false, error: 'User not found' };
@@ -176,7 +187,7 @@ export function AuthProvider({ children }) {
     return { ok: true };
   };
 
-  /* ─── Helpers ─── */
+  /* ═══ HELPERS ═══ */
   const getPendingUsers = (tenantId) =>
     users.filter(u => u.tenantId === tenantId && u.status === 'pending');
 

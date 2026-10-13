@@ -4,7 +4,7 @@ import {
   Package, Inbox, AlertTriangle, TrendingUp, ShoppingBag,
   ChevronRight, Truck, CheckCircle2, Clock, RefreshCw,
   DollarSign, Bell, Star, MessageSquare, UserCheck, Users,
-  Ticket, Plus, RotateCcw,
+  Ticket, Plus, RotateCcw, BarChart3,
 } from 'lucide-react';
 import { useInventory } from '../context/InventoryContext';
 import { useOrders } from '../context/OrderContext';
@@ -548,6 +548,31 @@ export default function StaffHome() {
     </Link>
   </div>
 </div>
+
+      {/* 📊 Analytics Quick Link (owner only) */}
+      {isOwner && (
+        <div className="bg-white p-4 sm:p-5 rounded-xl shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="w-10 h-10 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+                <BarChart3 size={18} />
+              </span>
+              <div className="min-w-0">
+                <p className="font-semibold text-sm text-gray-900">Analytics</p>
+                <p className="text-[11px] text-gray-500">
+                  Revenue charts, top products, conversion funnel & more
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/analytics"
+              className="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-full bg-purple-500 hover:bg-purple-600 text-white text-xs font-bold transition-colors"
+            >
+              View <ChevronRight size={12} />
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* ═══ RECENT ORDERS + TOP PRODUCTS ═══ */}
       {!ready ? (

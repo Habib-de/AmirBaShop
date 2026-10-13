@@ -1,0 +1,23 @@
+# ═══════════════════════════════════════════════════════════
+#   AMIR BabyShop — robots.txt
+#   Allows all crawlers on public pages. Blocks private/admin.
+# ═══════════════════════════════════════════════════════════
+
+User-agent: *
+Allow: /
+
+# ─── Block admin / private pages from search engines ───
+Disallow: /admin
+Disallow: /inventory
+Disallow: /orders
+Disallow: /team
+Disallow: /coupons
+Disallow: /staff/returns
+Disallow: /checkout
+Disallow: /cart
+Disallow: /profile
+Disallow: /notifications
+Disallow: /my-orders
+
+# ─── Sitemap ───
+Sitemap: https://amirbabyshop.co.ke/sitemap.xml
