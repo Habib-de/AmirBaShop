@@ -1,0 +1,35 @@
+# ─── Maven ───
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# ─── IDE ───
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+
+# ─── OS ───
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Env / secrets ───
+.env
+*.env.local
+application-local.yml
+application-local.properties
+
+# ─── Logs ───
+logs/
+*.log
+*.log.*
+
+# ─── Node (in case you run frontend tooling here) ───
+node_modules/

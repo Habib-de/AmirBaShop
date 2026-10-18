@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.env
+backend/target/
+.DS_Store

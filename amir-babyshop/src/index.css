@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-amir-cream font-sans antialiased text-amir-dark;
+    font-size: 16px;
+    line-height: 1.6;
+    overflow-x: hidden;
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+  button, a { @apply min-h-[44px]; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 bg-amir-pink hover:bg-pink-400 text-amir-dark font-bold py-3 px-6 rounded-full transition-all duration-200 active:scale-95 shadow-sm hover:shadow-md;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 bg-white hover:bg-gray-50 text-amir-dark font-semibold py-3 px-6 rounded-full border-2 border-gray-200 transition-all duration-200 active:scale-95;
+  }
+  .btn-icon {
+    @apply inline-flex items-center justify-center w-11 h-11 rounded-full transition-all duration-200 active:scale-90;
+  }
+  .card {
+    @apply bg-white rounded-2xl shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden;
+  }
+  .input {
+    @apply w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-amir-pink focus:outline-none text-base;
+  }
+  .badge {
+    @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide;
+  }
+}
+
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* ═══════════════════════════════════════════════════════════
+   🌙 DARK MODE (plain CSS — no @apply with escaped classes)
+   ═══════════════════════════════════════════════════════════ */
+
+html.dark body {
+  background-color: #030712;      /* gray-950 */
+  color: #f3f4f6;                 /* gray-100 */
+}
+
+/* Headers */
+html.dark header {
+  background-color: rgba(17, 24, 39, 0.95);
+  border-color: #1f2937;
+}
+
+/* Cards */
+html.dark .card {
+  background-color: #111827;      /* gray-900 */
+  border: 1px solid #1f2937;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+/* Buttons (secondary) */
+html.dark .btn-secondary {
+  background-color: #1f2937;      /* gray-800 */
+  border-color: #374151;
+  color: #f3f4f6;
+}
+html.dark .btn-secondary:hover {
+  background-color: #374151;      /* gray-700 */
+}
+
+/* Inputs */
+html.dark .input {
+  background-color: #111827;
+  border-color: #374151;
+  color: #f3f4f6;
+}
+html.dark .input::placeholder {
+  color: #6b7280;
+}
+html.dark .input:focus {
+  border-color: #FFB6C1;          /* amir-pink */
+}
+
+/* White backgrounds → dark */
+html.dark .bg-white {
+  background-color: #111827;
+}
+
+html.dark .bg-gray-50 {
+  background-color: #0b1220;
+}
+html.dark .bg-gray-100 {
+  background-color: #1f2937;
+}
+
+html.dark .bg-amir-cream {
+  background-color: #111827;
+}
+
+/* Text colors */
+html.dark .text-amir-dark { color: #f3f4f6; }
+html.dark .text-gray-900  { color: #f3f4f6; }
+html.dark .text-gray-800  { color: #f3f4f6; }
+html.dark .text-gray-700  { color: #e5e7eb; }
+html.dark .text-gray-600  { color: #d1d5db; }
+html.dark .text-gray-500  { color: #9ca3af; }
+html.dark .text-gray-400  { color: #6b7280; }
+
+/* Borders */
+html.dark .border-gray-100 { border-color: #1f2937; }
+html.dark .border-gray-200 { border-color: #374151; }
+
+/* Hovers */
+html.dark .hover\:bg-gray-50:hover {
+  background-color: #1f2937;
+}
+html.dark .hover\:bg-gray-100:hover {
+  background-color: #1f2937;
+}
+html.dark .hover\:bg-white:hover {
+  background-color: #1f2937;
+}
+
+/* Skeleton shimmer dark */
+html.dark .animate-shimmer {
+  background: linear-gradient(
+    to right,
+    #1f2937 0%,
+    #374151 50%,
+    #1f2937 100%
+  );
+}
