@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuth } from './AuthContext';
-import { couponService } from '../services/api';
+import { couponService, returnService } from '../services/api';
 import { SIZE_GUIDES } from '../data/sizeGuides';
 
 const ExtrasContext = createContext();
@@ -33,16 +33,17 @@ const userKey = (base, user) => {
    PROVIDER
    ═══════════════════════════════════════════════════════════ */
 export function ExtrasProvider({ children }) {
-  const { user } = useAuth();
+
+  const { user, isStaff } = useAuth();
 
   /* ─── COUPONS (server-backed) ─── */
   const [coupons, setCoupons] = useState([]);
   const [couponsLoading, setCouponsLoading] = useState(false);
 
-  /* ─── RETURNS ─── */
-  const [returns, setReturns] = useState(() =>
-    safeParse(localStorage.getItem(RETURNS_KEY), [])
-  );
+    /* ─── RETURNS (server-backed) ─── */
+  const [returns, setReturns] = useState([]);
+  const [returnsLoading, setReturnsLoading] = useState(false);
+
 
   /* ─── NOTIFICATIONS ─── */
   const [notifications, setNotifications] = useState(() =>
@@ -81,7 +82,6 @@ export function ExtrasProvider({ children }) {
   useEffect(() => { loadCoupons(); }, [loadCoupons]);
 
   /* ─── Persist ─── */
-  useEffect(() => { localStorage.setItem(RETURNS_KEY, JSON.stringify(returns)); }, [returns]);
   useEffect(() => { localStorage.setItem(NOTIFS_KEY, JSON.stringify(notifications)); }, [notifications]);
   useEffect(() => { localStorage.setItem(STOCK_ALERTS_KEY, JSON.stringify(stockAlerts)); }, [stockAlerts]);
 
@@ -171,56 +171,79 @@ export function ExtrasProvider({ children }) {
   const couponDiscount = appliedCoupon?.discount || 0;
   const couponIsFreeShip = appliedCoupon?.type === 'freeship';
 
-  /* ═══════════════════════════════════════════════════════════
-     📦 RETURNS — unchanged
+    /* ═══════════════════════════════════════════════════════════
+     📦 RETURNS (server-backed)
      ═══════════════════════════════════════════════════════════ */
-  const requestReturn = ({ order, items, reason, note, user: reqUser }) => {
-    const entry = {
-      id: `RT-${Date.now().toString().slice(-6)}`,
-      orderId: order.id,
-      customerEmail: (order.customer?.email || reqUser?.email || '').toLowerCase(),
-      customerName: order.customer?.name || reqUser?.name || 'Guest',
-      items: items.map(i => ({
-        id: i.id, key: i.key, name: i.name, image: i.image,
-        qty: i.qty, price: i.price, size: i.size, color: i.color,
-      })),
-      reason: reason || 'Other',
-      note: (note || '').trim(),
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    setReturns(prev => [entry, ...prev]);
-    return entry;
+
+  const loadReturns = useCallback(async () => {
+    if (!user) {
+      setReturns([]);
+      return;
+    }
+    setReturnsLoading(true);
+    try {
+      const list = isStaff ? await returnService.listAll() : await returnService.listMine();
+      setReturns(list);
+    } catch (err) {
+      console.warn('[Returns] load failed:', err.message);
+      setReturns([]);
+    } finally {
+      setReturnsLoading(false);
+    }
+  }, [user, isStaff]);
+
+  useEffect(() => { loadReturns(); }, [loadReturns]);
+
+  const requestReturn = async ({ order, items, reason, note, user: reqUser }) => {
+    try {
+      const newReturn = await returnService.create({
+        orderId: order.id,
+        reason: reason || 'Other',
+        note: note || '',
+        items: items.map(i => ({
+          id: i.id, name: i.name, image: i.image, qty: i.qty, price: i.price
+        })),
+      });
+      setReturns(prev => [newReturn, ...prev]);
+      return { ok: true, return: newReturn };
+    } catch (err) {
+      return { ok: false, error: err.message || 'Failed to request return' };
+    }
   };
 
-  const updateReturnStatus = (id, status, extra = {}) => {
-    setReturns(prev => prev.map(r =>
-      r.id === id
-        ? {
-            ...r,
-            status,
-            ...(status !== 'rejected' ? { rejectionReason: null } : {}),
-            ...extra,
-            updatedAt: new Date().toISOString(),
-          }
-        : r
-    ));
+  const approveReturn = async (id) => {
+    try {
+      const updated = await returnService.updateStatus(id, 'approved');
+      setReturns(prev => prev.map(r => r.id === id ? updated : r));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   };
 
-  const approveReturn  = (id) => updateReturnStatus(id, 'approved');
-  const completeReturn = (id) => updateReturnStatus(id, 'completed');
+  const rejectReturn = async (id, reason = '') => {
+    try {
+      const updated = await returnService.updateStatus(id, 'rejected', reason || 'No reason provided');
+      setReturns(prev => prev.map(r => r.id === id ? updated : r));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  };
 
-  const rejectReturn = (id, reason = '') => {
-    updateReturnStatus(id, 'rejected', {
-      rejectionReason: (reason || '').trim() || 'No reason provided',
-    });
+  const completeReturn = async (id) => {
+    try {
+      const updated = await returnService.updateStatus(id, 'completed');
+      setReturns(prev => prev.map(r => r.id === id ? updated : r));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   };
 
   const getMyReturns = (email) => {
     if (!email) return [];
-    const target = email.toLowerCase();
-    return returns.filter(r => r.customerEmail === target);
+    return returns.filter(r => r.customerEmail?.toLowerCase() === email.toLowerCase());
   };
 
   const getReturnById = (id) => returns.find(r => r.id === id) || null;
@@ -364,8 +387,8 @@ export function ExtrasProvider({ children }) {
       appliedCoupon, applyCoupon, removeCoupon,
       couponDiscount, couponIsFreeShip,
 
-      /* 📦 Returns */
-      returns, returnCounts,
+            /* 📦 Returns */
+      returns, returnsLoading, returnCounts,
       requestReturn, approveReturn, rejectReturn, completeReturn,
       getMyReturns, getReturnById,
 

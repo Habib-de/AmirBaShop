@@ -13,6 +13,9 @@ import {
      - Courier (G4S, Sendy, Posta): Confirmed → Picked up → In transit → Out for delivery → Delivered
      - Local delivery:              Confirmed → Out for delivery → Delivered
      - Pickup from shop:            Confirmed → Ready for pickup → Collected
+
+   Automatically renders VERTICALLY for staff (no `compact`) and
+   HORIZONTALLY for customers (`compact` prop = true).
    ═══════════════════════════════════════════════════════════ */
 
 const STEP_ICONS = {
@@ -69,55 +72,127 @@ export default function TrackingTimeline({
         </div>
       )}
 
-      <div className="relative">
-        {flow.map((step, idx) => {
-          const status = getCheckpointStatusInFlow(checkpoints, step.type, carrierId);
-          const meta = buildCheckpoint(step.type);
-          const Icon = STEP_ICONS[step.type] || Check;
-          const cp = checkpoints.find(c => c.type === step.type);
-          const isLast = idx === flow.length - 1;
+            {/* 👇 HORIZONTAL COMPACT VIEW (with dates & notes) 👇 */}
+      {compact ? (
+        <div className="flex items-start justify-between w-full mt-4 overflow-x-auto hide-scrollbar pb-4 gap-2">
+          {flow.map((step, idx) => {
+            const status = getCheckpointStatusInFlow(checkpoints, step.type, carrierId);
+            const meta = buildCheckpoint(step.type);
+            const Icon = STEP_ICONS[step.type] || Check;
+            const cp = checkpoints.find(c => c.type === step.type);
+            const isLast = idx === flow.length - 1;
 
-          return (
-            <div key={step.type} className="relative flex gap-3">
-              {!isLast && (
-                <div className={`absolute left-[15px] top-8 w-0.5 ${
-                  status === 'done' ? 'bg-emerald-400' : 'bg-gray-200'
-                }`} style={{ height: compact ? '16px' : '24px' }} />
-              )}
+            return (
+              <div key={step.type} className="flex flex-col items-center flex-1 min-w-[70px] relative">
+                
+                {/* Connecting Line */}
+                {!isLast && (
+                  <div className={`absolute top-4 left-1/2 w-full h-0.5 ${
+                    status === 'done' ? 'bg-emerald-400' : 'bg-gray-200'
+                  }`} />
+                )}
 
-              <div className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all ${
-                status === 'done'
-                  ? 'bg-emerald-500 text-white'
-                  : status === 'current'
-                  ? 'bg-amir-pink text-amir-dark ring-4 ring-amir-pink/30'
-                  : 'bg-gray-100 text-gray-400 border-2 border-gray-200'
-              }`}>
-                {status === 'done' ? <Check size={14} /> : <Icon size={14} />}
-              </div>
-
-              <div className={`flex-1 min-w-0 ${isLast ? '' : compact ? 'pb-4' : 'pb-6'}`}>
-                <p className={`text-xs font-bold leading-tight ${
-                  status === 'done'    ? 'text-emerald-700' :
-                  status === 'current' ? 'text-amir-dark' :
-                                         'text-amir-dark/40'
+                {/* Circle Icon */}
+                <div className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                  status === 'done'
+                    ? 'bg-emerald-500 text-white'
+                    : status === 'current'
+                    ? 'bg-amir-pink text-amir-dark ring-4 ring-amir-pink/30'
+                    : 'bg-gray-100 text-gray-400 border-2 border-gray-200'
                 }`}>
-                  {meta.label}
-                </p>
-                {cp?.at && (
-                  <p className="text-[10px] text-amir-dark/50 font-semibold mt-0.5">
-                    {formatTrackingDate(cp.at)}
+                  {status === 'done' ? <Check size={14} /> : <Icon size={14} />}
+                </div>
+
+                {/* Label & Date */}
+                <div className="text-center mt-2 px-0.5 w-full">
+                  <p className={`text-[9px] font-bold leading-tight ${
+                    status === 'done'    ? 'text-emerald-700' :
+                    status === 'current' ? 'text-amir-dark' :
+                                           'text-amir-dark/40'
+                  }`}>
+                    {meta.label}
                   </p>
-                )}
-                {status === 'current' && cp?.note && !compact && (
-                  <p className="text-[10px] text-amir-dark/60 font-semibold mt-1 leading-relaxed">
-                    {cp.note}
-                  </p>
-                )}
+                  
+                  {cp?.at && (
+                    <p className="text-[8px] text-amir-dark/50 font-semibold mt-0.5">
+                      {formatTrackingDate(cp.at)}
+                    </p>
+                  )}
+                  
+                  {/* The Note (e.g. "Arriving today") */}
+                  {status === 'current' && cp?.note && (
+                    <p className="text-[8px] text-amir-dark/60 font-semibold mt-1 leading-tight italic line-clamp-2">
+                      {cp.note}
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* ═════════════════════════════════════════════════════
+            VERTICAL DETAILED VIEW — for staff (Orders)
+           ═════════════════════════════════════════════════════ */
+        <div className="relative">
+          {flow.map((step, idx) => {
+            const status = getCheckpointStatusInFlow(checkpoints, step.type, carrierId);
+            const meta = buildCheckpoint(step.type);
+            const Icon = STEP_ICONS[step.type] || Check;
+            const cp = checkpoints.find(c => c.type === step.type);
+            const isLast = idx === flow.length - 1;
+
+            return (
+              <div key={step.type} className="relative flex gap-3">
+                {!isLast && (
+                  <div
+                    className={`absolute left-[15px] top-8 w-0.5 ${
+                      status === 'done' ? 'bg-emerald-400' : 'bg-gray-200'
+                    }`}
+                    style={{ height: '24px' }}
+                  />
+                )}
+
+                <div
+                  className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                    status === 'done'
+                      ? 'bg-emerald-500 text-white'
+                      : status === 'current'
+                      ? 'bg-amir-pink text-amir-dark ring-4 ring-amir-pink/30'
+                      : 'bg-gray-100 text-gray-400 border-2 border-gray-200'
+                  }`}
+                >
+                  {status === 'done' ? <Check size={14} /> : <Icon size={14} />}
+                </div>
+
+                <div className={`flex-1 min-w-0 ${isLast ? '' : 'pb-6'}`}>
+                  <p
+                    className={`text-xs font-bold leading-tight ${
+                      status === 'done'
+                        ? 'text-emerald-700'
+                        : status === 'current'
+                        ? 'text-amir-dark'
+                        : 'text-amir-dark/40'
+                    }`}
+                  >
+                    {meta.label}
+                  </p>
+                  {cp?.at && (
+                    <p className="text-[10px] text-amir-dark/50 font-semibold mt-0.5">
+                      {formatTrackingDate(cp.at)}
+                    </p>
+                  )}
+                  {status === 'current' && cp?.note && (
+                    <p className="text-[10px] text-amir-dark/60 font-semibold mt-1 leading-relaxed">
+                      {cp.note}
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -116,8 +116,23 @@ export default function MyOrders() {
         </div>
       ) : (
         <div className="space-y-3">
-          {myOrders.map(o => {
-            const meta = STATUS_META[o.status] || STATUS_META.pending;
+                    {myOrders.map(o => {
+            // 🔥 READ CHECKPOINTS
+            const checkpoints = o.checkpoints || [];
+            const lastCheckpoint = checkpoints[checkpoints.length - 1];
+            
+            let displayLabel = STATUS_META[o.status]?.label || 'Pending';
+            let displayClass = STATUS_META[o.status]?.cls || STATUS_META.pending.cls;
+
+            if (lastCheckpoint) {
+              displayLabel = lastCheckpoint.label;
+              if (lastCheckpoint.type === 'delivered' || lastCheckpoint.type === 'collected') {
+                displayClass = STATUS_META.fulfilled.cls;
+              } else {
+                displayClass = 'bg-blue-100 text-blue-800';
+              }
+            }
+
             const isOpen = expanded === o.id;
             const canReturn = o.status === 'fulfilled';
             const alreadyReturned = hasReturned(o.id);
@@ -153,9 +168,9 @@ const etaHint =
                       </p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      <span className={`badge text-[10px] px-2 py-0.5 ${meta.cls}`}>
-                        {meta.label}
-                      </span>
+                      <span className={`badge text-[10px] px-2 py-0.5 ${displayClass}`}>
+  {displayLabel}
+</span>
                       <ChevronDown
                         size={16}
                         className={`text-amir-dark/40 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
@@ -163,7 +178,13 @@ const etaHint =
                     </div>
                   </div>
 
-                  <OrderTimeline status={o.status} compact />
+                                    {/* {o.checkpoints && o.checkpoints.length > 0 ? (
+                    <div className="mt-2">
+                      <TrackingTimeline checkpoints={o.checkpoints} carrierId={o.carrier} compact />
+                    </div>
+                  ) : (
+                    <OrderTimeline status={o.status} compact />
+                  )} */}
 
                   {o.trackingNumber && (
                     <div className="mt-3 pt-3 border-t border-amir-dark/5">
@@ -224,14 +245,7 @@ const etaHint =
                 {isOpen && (
                   <div className="border-t border-amir-dark/5 p-3 sm:p-4 bg-amir-cream/30 animate-fade-in space-y-4">
 
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/50 mb-3">
-                        Order progress
-                      </p>
-                      <OrderTimeline status={o.status} />
-                    </div>
-
-                    {o.trackingNumber && o.checkpoints?.length > 0 && (
+                                                            {o.trackingNumber && o.checkpoints?.length > 0 ? (
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/50 flex items-center gap-1.5">
@@ -247,8 +261,15 @@ const etaHint =
                           <p className="text-[10px] font-mono font-bold text-amir-dark/60 mb-3">
                             {o.trackingNumber}
                           </p>
-                          <TrackingTimeline checkpoints={o.checkpoints} carrierId={o.carrier} />
+                          <TrackingTimeline checkpoints={o.checkpoints} carrierId={o.carrier} compact={true} />
                         </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/50 mb-2">
+                          Order progress
+                        </p>
+                        <OrderTimeline status={o.status} />
                       </div>
                     )}
 

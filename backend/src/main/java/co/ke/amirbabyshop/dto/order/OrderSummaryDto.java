@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map; 
 
 /**
  * Lightweight order shape for lists (My Orders, admin Orders list).
@@ -29,5 +30,11 @@ public class OrderSummaryDto {
     private String carrierName;
     private Instant eta;
     private String registryGiftId; 
+
+     private List<Map<String, Object>> checkpoints; 
+
+    private String paymentMethod;
+    private String paymentStatus;
+
     private Instant createdAt;
 }

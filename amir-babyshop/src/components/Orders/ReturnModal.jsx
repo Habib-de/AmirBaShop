@@ -40,7 +40,7 @@ export default function ReturnModal({ order, onClose, onSuccess }) {
   const selectedItems = order.items.filter((it, i) => selected[it.key || `idx-${i}`]);
   const refundTotal = selectedItems.reduce((s, it) => s + it.price * it.qty, 0);
 
-  const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
@@ -53,7 +53,8 @@ export default function ReturnModal({ order, onClose, onSuccess }) {
       return;
     }
 
-    requestReturn({
+    // 🔥 Await the API call
+    const res = await requestReturn({
       order,
       items: selectedItems,
       reason,
@@ -61,6 +62,12 @@ export default function ReturnModal({ order, onClose, onSuccess }) {
       user,
     });
 
+    if (!res.ok) {
+      setError(res.error || 'Failed to submit return');
+      return;
+    }
+
+    // Only close if it succeeded
     onSuccess?.();
   };
 

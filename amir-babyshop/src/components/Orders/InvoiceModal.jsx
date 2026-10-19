@@ -206,11 +206,26 @@ function InvoiceContent({ order, title }) {
             </span>
           </div>
 
-          {order.payment && (
+                    {order.payment && (
             <div className="flex justify-between text-xs pt-1">
-              <span className="text-amir-dark/60 font-semibold">Payment</span>
+              <span className="text-amir-dark/60 font-semibold">Payment Method</span>
               <span className="font-bold text-amir-dark uppercase">
-                {order.payment}
+                {order.payment === 'cod' ? 'Cash on Delivery' : order.payment === 'momo' ? 'Mobile Money' : order.payment}
+              </span>
+            </div>
+          )}
+
+          {order.paymentStatus && (
+            <div className="flex justify-between text-xs pt-1">
+              <span className="text-amir-dark/60 font-semibold">Payment Status</span>
+              <span className={`font-bold uppercase ${
+                order.paymentStatus === 'paid' 
+                  ? 'text-emerald-600' 
+                  : order.paymentStatus === 'refunded'
+                  ? 'text-rose-600'
+                  : 'text-amber-600'
+              }`}>
+                {order.paymentStatus}
               </span>
             </div>
           )}
@@ -258,11 +273,27 @@ function buildPrintHTML(order, title) {
       </div>`
     : '';
 
-  const paymentRow = order.payment
+    const paymentRow = order.payment
+    ? `
+      <div class="totals-row" style="margin-top: 6px;">
+        <span class="muted">Payment Method</span>
+        <span class="bold uppercase">${escapeHtml(
+          order.payment === 'cod' ? 'Cash on Delivery' : 
+          order.payment === 'momo' ? 'Mobile Money' : 
+          order.payment
+        )}</span>
+      </div>`
+    : '';
+
+  const paymentStatusRow = order.paymentStatus
     ? `
       <div class="totals-row">
-        <span class="muted">Payment</span>
-        <span class="bold uppercase">${escapeHtml(order.payment)}</span>
+        <span class="muted">Payment Status</span>
+        <span class="bold uppercase" style="color: ${
+          order.paymentStatus === 'paid' ? '#059669' : 
+          order.paymentStatus === 'refunded' ? '#e11d48' : 
+          '#d97706'
+        }">${escapeHtml(order.paymentStatus)}</span>
       </div>`
     : '';
 
@@ -368,7 +399,7 @@ function buildPrintHTML(order, title) {
     <tbody>${items}</tbody>
   </table>
 
-  <div class="totals">
+    <div class="totals">
     <div class="totals-row">
       <span class="muted">Subtotal</span>
       <span class="bold">${escapeHtml(formatCurrency(order.subtotal ?? 0))}</span>
@@ -379,6 +410,7 @@ function buildPrintHTML(order, title) {
       <span>${escapeHtml(formatCurrency(order.total ?? 0))}</span>
     </div>
     ${paymentRow}
+    ${paymentStatusRow}
   </div>
 
   <div class="footer">

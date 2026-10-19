@@ -143,6 +143,19 @@ public class OrderController {
                 orderService.update(principal.getTenantId(), principal.getRole(), id, patch));
     }
 
+    /* ═══════════════ UPDATE PAYMENT STATUS (staff only) ═══════════════ */
+
+    @PatchMapping("/{id}/payment-status")
+    public ApiResponse<OrderDto> updatePaymentStatus(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable String id,
+            @RequestBody Map<String, String> body
+    ) {
+        if (principal == null) throw new UnauthorizedException("Not authenticated");
+        return ApiResponse.ok("Payment status updated",
+                orderService.updatePaymentStatus(principal.getTenantId(), principal.getRole(), id, body.get("status")));
+    }
+
     /* ═══════════════ DELETE (staff only) ═══════════════ */
 
     @DeleteMapping("/{id}")

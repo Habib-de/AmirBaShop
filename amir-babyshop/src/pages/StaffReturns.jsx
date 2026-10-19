@@ -118,8 +118,8 @@ export default function StaffReturns() {
     setExpanded(null);
   };
 
-  const handleReject = (r, reason) => {
-    rejectReturn(r.id);
+    const handleReject = (r, reason) => {
+    rejectReturn(r.id, reason); // 👈 PASS THE REASON HERE
     setRejecting(null);
 
     if (r.customerEmail) {

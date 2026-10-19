@@ -7,6 +7,7 @@ import {
 import toast from 'react-hot-toast';
 import { useOrders, ORDER_STATUS } from '../context/OrderContext';
 import { useInventory } from '../context/InventoryContext';
+import { orderService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useExtras } from '../context/ExtrasContext';
 import { formatCurrency } from '../utils/format';
@@ -30,7 +31,7 @@ const STATUS_META = {
 };
 
 export default function Orders() {
-  const { orders, confirmOrder, fulfillOrder, cancelOrder, deleteOrder, updateOrder, addCheckpoint, counts } = useOrders();
+  const { orders, confirmOrder, fulfillOrder, cancelOrder, deleteOrder, updateOrder, addCheckpoint, counts, reload } = useOrders();
   const { updateStock, products } = useInventory();
   const { isOwner, isSales } = useAuth();
   const { notify } = useExtras();
@@ -213,17 +214,31 @@ export default function Orders() {
         </div>
       ) : (
         <div className="space-y-2 sm:space-y-3">
-          {filtered.map(o => {
-            const meta = STATUS_META[o.status] || STATUS_META.pending;
-            const isActionable =
-              o.status === ORDER_STATUS.PENDING || o.status === ORDER_STATUS.CONFIRMED;
+                    {filtered.map(o => {
+            // 🔥 READ CHECKPOINTS INSTEAD OF DATABASE STATUS
+            const checkpoints = o.checkpoints || [];
+            const lastCheckpoint = checkpoints[checkpoints.length - 1];
+            
+            let displayLabel = STATUS_META[o.status]?.label || 'Pending';
+            let displayClass = STATUS_META[o.status]?.cls || STATUS_META.pending.cls;
+
+            if (lastCheckpoint) {
+              // If there's a checkpoint, use its label (e.g., "In Transit")
+              displayLabel = lastCheckpoint.label;
+              // Style it based on whether it's delivered
+              if (lastCheckpoint.type === 'delivered' || lastCheckpoint.type === 'collected') {
+                displayClass = STATUS_META.fulfilled.cls;
+              } else {
+                displayClass = 'bg-blue-100 text-blue-800 border-blue-200'; // Stays blue for in-transit
+              }
+            }
+
+            const isActionable = o.status === 'pending' || o.status === 'confirmed';
             const isOpen = expanded === o.id;
 
-            /* Determine next step button for confirmed orders */
-            const nextStep =
-              o.status === ORDER_STATUS.CONFIRMED
-                ? getNextCheckpoint(o.checkpoints || [], o.carrier)
-                : null;
+            const nextStep = isActionable
+              ? getNextCheckpoint(checkpoints, o.carrier)
+              : null;
 
             return (
               <div key={o.id} className="card overflow-hidden">
@@ -245,8 +260,8 @@ export default function Orders() {
                     </div>
 
                                         <div className="flex items-center gap-1 shrink-0">
-                      <span className={`badge border ${meta.cls} text-[9px] sm:text-[10px] px-2 py-0.5`}>
-                        {meta.label}
+                                            <span className={`badge border ${displayClass} text-[9px] sm:text-[10px] px-2 py-0.5`}>
+                        {displayLabel}
                       </span>
                       {o.registryGiftId && (
                         <span className="badge bg-pink-100 text-pink-700 text-[9px] px-1.5 py-0.5 inline-flex items-center gap-0.5">
@@ -354,7 +369,7 @@ export default function Orders() {
                         <p className="text-[10px] text-amir-dark/50 font-mono font-bold mb-3">
                           {o.trackingNumber}
                         </p>
-                        <TrackingTimeline checkpoints={o.checkpoints} carrierId={o.carrier} />
+                        <TrackingTimeline checkpoints={o.checkpoints} carrierId={o.carrier} compact={true} />
                       </div>
                     )}
 
@@ -456,9 +471,33 @@ export default function Orders() {
                       <Printer size={14} /> Print invoice
                     </button>
 
-                    {/* ═══ ACTION BUTTONS ═══ */}
+                                        {/* ═══ ACTION BUTTONS ═══ */}
                     {isActionable && (
-                      <div className="flex gap-1.5 mt-3 pt-3 border-t border-amir-dark/10">
+                      <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-amir-dark/10">
+                        
+                        {/* 👇 ADD PAYMENT BUTTON HERE 👇 */}
+                        <button
+                          onClick={async () => {
+                            const newStatus = o.paymentStatus === 'paid' ? 'unpaid' : 'paid';
+                            try {
+                              await orderService.updatePaymentStatus(o.id, newStatus);
+                              reload();
+                              toast.success(`Payment marked as ${newStatus}`, { icon: '💰' });
+                            } catch (err) {
+                              toast.error('Failed to update payment');
+                            }
+                          }}
+                          className={`flex-1 min-w-[120px] font-bold py-2 px-3 rounded-full text-xs transition-all active:scale-95 inline-flex items-center justify-center gap-1.5 ${
+                            o.paymentStatus === 'paid'
+                              ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                              : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                          }`}
+                        >
+                          <CreditCard size={14} />
+                          {o.paymentStatus === 'paid' ? 'Paid ✅' : 'Mark as Paid'}
+                        </button>
+                        {/* 👆 END PAYMENT BUTTON 👆 */}
+
                         {o.status === ORDER_STATUS.PENDING && (
                           <button
                             onClick={() => handleConfirmClick(o)}
@@ -468,7 +507,7 @@ export default function Orders() {
                           </button>
                         )}
 
-                        {o.status === ORDER_STATUS.CONFIRMED && nextStep && (
+                                                {(o.status === ORDER_STATUS.CONFIRMED || o.status === ORDER_STATUS.PENDING) && nextStep && (
                           <button
                             onClick={() => handleAdvanceStage(o)}
                             className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 px-3 rounded-full text-xs transition-all active:scale-95 inline-flex items-center justify-center gap-1.5"

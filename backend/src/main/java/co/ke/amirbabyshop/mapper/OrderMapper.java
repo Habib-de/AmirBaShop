@@ -74,6 +74,9 @@ public class OrderMapper {
                 .carrierName(o.getCarrierName())
                 .eta(o.getEta())
                 .registryGiftId(o.getRegistryGiftId()) 
+                .checkpoints(parseCheckpoints(o.getCheckpoints()))
+                .paymentMethod(o.getPaymentMethod())     // 👈 ADD THIS
+                .paymentStatus(o.getPaymentStatus()) 
                 .createdAt(o.getCreatedAt())
                 .build();
     }

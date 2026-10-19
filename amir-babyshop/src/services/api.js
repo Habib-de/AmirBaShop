@@ -1024,6 +1024,15 @@ export const orderService = {
       ? mockOrdersUpdate(id, patch)
       : apiRequest(`/orders/${id}`, { method: 'PATCH', body: patch, auth: true }),
 
+  updatePaymentStatus: async (id, status) => {
+    const dto = await apiRequest(`/orders/${id}/payment-status`, {
+      method: 'PATCH',
+      body: { status },
+      auth: true,
+    });
+    return normalizeOrder(dto);
+  },    
+
   remove: (id) =>
     MOCK_MODE.order
       ? mockOrdersRemove(id)
@@ -1044,6 +1053,48 @@ export const orderService = {
    ═══════════════════════════════════════════════════════════ */
 export { apiRequest as request, delay, safeParse, MOCK_MODE, BASE_URL };
 
+function normalizeReturn(dto) {
+  if (!dto) return null;
+  return {
+    id: dto.id,
+    orderId: dto.orderId,
+    userId: dto.userId,
+    customerName: dto.customerName,
+    customerEmail: dto.customerEmail,
+    reason: dto.reason,
+    note: dto.note,
+    status: dto.status,
+    rejectionReason: dto.rejectionReason,
+    refundAmount: Number(dto.refundAmount) || 0,
+    items: dto.items || [],
+    createdAt: dto.createdAt,
+    updatedAt: dto.updatedAt,
+  };
+}
+
+export const returnService = {
+  create: async (data) => {
+    const dto = await apiRequest('/returns', { method: 'POST', body: data, auth: true });
+    return normalizeReturn(dto);
+  },
+  listAll: async () => {
+    const list = await apiRequest('/returns', { auth: true });
+    return (list || []).map(normalizeReturn);
+  },
+  listMine: async () => {
+    const list = await apiRequest('/returns/mine', { auth: true });
+    return (list || []).map(normalizeReturn);
+  },
+  updateStatus: async (id, status, rejectionReason = null) => {
+    const dto = await apiRequest(`/returns/${id}/status`, {
+      method: 'PATCH',
+      body: { status, rejectionReason },
+      auth: true,
+    });
+    return normalizeReturn(dto);
+  },
+};
+
 /* ═══════════════════════════════════════════════════════════
    DEFAULT EXPORT — namespaced services
    ═══════════════════════════════════════════════════════════ */
@@ -1057,4 +1108,5 @@ export default {
   auth: authService,
   user: userService,
   tenant: tenantService,
+  return: returnService,
 };

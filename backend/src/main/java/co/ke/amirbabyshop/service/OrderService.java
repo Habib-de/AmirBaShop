@@ -325,6 +325,22 @@ public class OrderService {
         return orderMapper.toDto(order, orderItemRepository.findByOrderId(order.getId()));
     }
 
+        /* ═══════════════ UPDATE PAYMENT STATUS (staff only) ═══════════════ */
+    @Transactional
+    public OrderDto updatePaymentStatus(String tenantId, String callerRole, String orderId, String status) {
+        requireStaff(callerRole);
+        Order order = orderRepository.findByIdAndTenantId(orderId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        if (!List.of("unpaid", "paid", "refunded").contains(status)) {
+            throw new ApiException("Invalid payment status", HttpStatus.BAD_REQUEST);
+        }
+
+        order.setPaymentStatus(status);
+        orderRepository.save(order);
+        return orderMapper.toDto(order, orderItemRepository.findByOrderId(order.getId()));
+    }
+
     /* ═══════════════ DELETE (staff only) ═══════════════ */
 
     @Transactional
@@ -360,6 +376,14 @@ public class OrderService {
         }
 
         list.add(checkpoint);
+
+        String checkpointType = String.valueOf(checkpoint.get("type"));
+        if ("delivered".equals(checkpointType) || "collected".equals(checkpointType)) {
+            order.setStatus("fulfilled");
+            order.setPaymentStatus("paid");
+        } else if ("picked_up".equals(checkpointType) || "in_transit".equals(checkpointType) || "out_for_delivery".equals(checkpointType)) {
+            order.setStatus("confirmed"); // Keeps it locked in 'confirmed' but we know it's moving
+        }
 
         try {
             order.setCheckpoints(objectMapper.writeValueAsString(list));
