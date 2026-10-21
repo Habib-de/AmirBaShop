@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuth } from './AuthContext';
-import { couponService, returnService } from '../services/api';
+import { couponService, returnService, notificationService } from '../services/api';
 import { SIZE_GUIDES } from '../data/sizeGuides';
 
 const ExtrasContext = createContext();
@@ -10,7 +10,7 @@ export const useExtras = () => useContext(ExtrasContext);
    STORAGE KEYS
    ═══════════════════════════════════════════════════════════ */
 const RETURNS_KEY       = 'amir_returns';
-const NOTIFS_KEY        = 'amir_notifications';
+// const NOTIFS_KEY        = 'amir_notifications';
 const APPLIED_KEY       = 'amir_applied_coupon';
 const STOCK_ALERTS_KEY  = 'amir_stock_alerts';
 
@@ -46,9 +46,7 @@ export function ExtrasProvider({ children }) {
 
 
   /* ─── NOTIFICATIONS ─── */
-  const [notifications, setNotifications] = useState(() =>
-    safeParse(localStorage.getItem(NOTIFS_KEY), [])
-  );
+  const [notifications, setNotifications] = useState([]);
 
   /* ─── STOCK ALERTS ─── */
   const [stockAlerts, setStockAlerts] = useState(() =>
@@ -82,7 +80,7 @@ export function ExtrasProvider({ children }) {
   useEffect(() => { loadCoupons(); }, [loadCoupons]);
 
   /* ─── Persist ─── */
-  useEffect(() => { localStorage.setItem(NOTIFS_KEY, JSON.stringify(notifications)); }, [notifications]);
+  
   useEffect(() => { localStorage.setItem(STOCK_ALERTS_KEY, JSON.stringify(stockAlerts)); }, [stockAlerts]);
 
   useEffect(() => {
@@ -257,54 +255,55 @@ export function ExtrasProvider({ children }) {
   }), [returns]);
 
   /* ═══════════════════════════════════════════════════════════
-     🔔 NOTIFICATIONS — unchanged
-     ═══════════════════════════════════════════════════════════ */
-  const notify = useCallback((email, { type = 'info', title, body, link }) => {
-    if (!email) return null;
-    const notif = {
-      id: `NT-${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 6)}`,
-      userEmail: email.toLowerCase(),
-      type,
-      title: (title || '').trim(),
-      body: (body || '').trim(),
-      link: link || null,
-      read: false,
-      createdAt: new Date().toISOString(),
-    };
-    setNotifications(prev => [notif, ...prev]);
-    return notif;
-  }, []);
+   🔔 NOTIFICATIONS — server-backed
+   ═══════════════════════════════════════════════════════════ */
+const loadNotifications = useCallback(async () => {
+  if (!user) { setNotifications([]); return; }
+  try {
+    const list = await notificationService.list();
+    setNotifications(list);
+  } catch (err) {
+    console.warn('[Notifications] load failed:', err.message);
+  }
+}, [user]);
 
-  const markNotifRead = (id) =>
+useEffect(() => { loadNotifications(); }, [loadNotifications]);
+
+useEffect(() => {
+  if (!user) return;
+  const id = setInterval(() => {
+    if (document.visibilityState === 'visible') loadNotifications();
+  }, 45000);
+  return () => clearInterval(id);
+}, [user, loadNotifications]);
+
+const getMyNotifs = useCallback(() => notifications, [notifications]);
+
+const getUnreadNotifCount = useCallback(
+  () => notifications.filter(n => !n.read).length,
+  [notifications]
+);
+
+const markNotifRead = useCallback(async (id) => {
+  try {
+    await notificationService.markRead(id);
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  } catch (err) { console.warn('[Notifications] markRead failed:', err.message); }
+}, []);
 
-  const markAllNotifsRead = (email) => {
-    if (!email) return;
-    const target = email.toLowerCase();
-    setNotifications(prev => prev.map(n =>
-      n.userEmail === target ? { ...n, read: true } : n
-    ));
-  };
+const markAllNotifsRead = useCallback(async () => {
+  try {
+    await notificationService.markAllRead();
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  } catch (err) { console.warn('[Notifications] markAllRead failed:', err.message); }
+}, []);
 
-  const clearNotifs = (email) => {
-    if (!email) return;
-    const target = email.toLowerCase();
-    setNotifications(prev => prev.filter(n => n.userEmail !== target));
-  };
-
-  const getMyNotifs = (email) => {
-    if (!email) return [];
-    const target = email.toLowerCase();
-    return notifications
-      .filter(n => n.userEmail === target)
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  };
-
-  const getUnreadNotifCount = (email) => {
-    if (!email) return 0;
-    const target = email.toLowerCase();
-    return notifications.filter(n => n.userEmail === target && !n.read).length;
-  };
+const clearNotifs = useCallback(async () => {
+  try {
+    await notificationService.clearAll();
+    setNotifications([]);
+  } catch (err) { console.warn('[Notifications] clearAll failed:', err.message); }
+}, []);
 
   /* ═══════════════════════════════════════════════════════════
      🔔 STOCK ALERTS — unchanged
@@ -348,30 +347,21 @@ export function ExtrasProvider({ children }) {
   };
 
   const notifyStockRestored = (productId, size, color, productName) => {
-    const matching = stockAlerts.filter(a =>
-      a.productId === productId &&
-      a.size === (size || null) &&
-      a.color === (color || null) &&
-      !a.notifiedAt
-    );
-    if (matching.length === 0) return 0;
+  const matching = stockAlerts.filter(a =>
+    a.productId === productId &&
+    a.size === (size || null) &&
+    a.color === (color || null) &&
+    !a.notifiedAt
+  );
+  if (matching.length === 0) return 0;
 
-    matching.forEach(a => {
-      notify(a.email, {
-        type: 'info',
-        title: `Back in stock: ${productName}`,
-        body: `${[size, color].filter(Boolean).join(' · ') || 'This item'} is available again. Order now!`,
-        link: `/product/${productId}`,
-      });
-    });
+  const ids = new Set(matching.map(m => m.id));
+  setStockAlerts(prev => prev.map(a =>
+    ids.has(a.id) ? { ...a, notifiedAt: new Date().toISOString() } : a
+  ));
 
-    const ids = new Set(matching.map(m => m.id));
-    setStockAlerts(prev => prev.map(a =>
-      ids.has(a.id) ? { ...a, notifiedAt: new Date().toISOString() } : a
-    ));
-
-    return matching.length;
-  };
+  return matching.length;
+};
 
   const getPendingAlerts = () =>
     stockAlerts.filter(a => !a.notifiedAt);
@@ -395,8 +385,8 @@ export function ExtrasProvider({ children }) {
       /* 📏 Size Guide (static, from data file) */
       sizeGuide: SIZE_GUIDES,
 
-      /* 🔔 Notifications */
-      notifications, notify,
+            /* 🔔 Notifications */
+      notifications, reloadNotifications: loadNotifications,
       markNotifRead, markAllNotifsRead, clearNotifs,
       getMyNotifs, getUnreadNotifCount,
 

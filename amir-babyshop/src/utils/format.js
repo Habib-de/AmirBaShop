@@ -1,66 +1,75 @@
 /* ═══════════════════════════════════════════════════════════
    FORMAT UTILITIES
-   ─────────────────────────────────────────────────────────
-   ⚠️ formatCurrency() stays SYNCHRONOUS so the 22 pages using
-   it don't need any refactor. It reads from module-level state
-   kept in sync by CurrencyContext via setCurrencyRuntime().
    ═══════════════════════════════════════════════════════════ */
 
-/* ─── Runtime state (updated by CurrencyContext) ─── */
 let _currency = 'KES';
-let _rates = { KES: 1, USD: 130 };   // 1 unit = X KES
-
-const META = {
-  KES: { symbol: 'KSh', locale: 'en-KE', decimals: 0 },
-  USD: { symbol: '$',   locale: 'en-US', decimals: 2 },
+/* Shape: { KES: { kesPerUnit: 1, ... }, USD: { kesPerUnit: 130, ... }, ... } */
+let _rates = {
+  KES: { currencyCode: 'KES', kesPerUnit: 1,   symbol: 'KSh', label: 'Kenyan Shilling' },
+  USD: { currencyCode: 'USD', kesPerUnit: 130, symbol: '$',   label: 'US Dollar' },
 };
 
-/* ─── Called by CurrencyContext whenever currency/rates change ─── */
+/* Hardcoded hints — only for locale + decimals the DB doesn't store.
+   Any currency not listed here falls back to en-US / 2 decimals. */
+const HARDCODED_META = {
+  KES: { locale: 'en-KE', decimals: 0 },
+  USD: { locale: 'en-US', decimals: 2 },
+  EUR: { locale: 'de-DE', decimals: 2 },
+  GBP: { locale: 'en-GB', decimals: 2 },
+  TZS: { locale: 'en-TZ', decimals: 0 },
+  UGX: { locale: 'en-UG', decimals: 0 },
+};
+
+const metaFor = (code) => {
+  const r = _rates[code];
+  const hardcoded = HARDCODED_META[code] || {};
+  return {
+    symbol: r?.symbol || code || '?',
+    locale: hardcoded.locale || 'en-US',
+    decimals: hardcoded.decimals ?? 2,
+  };
+};
+
 export const setCurrencyRuntime = (currency, rates) => {
-  if (META[currency]) _currency = currency;
   if (rates && typeof rates === 'object') _rates = { ..._rates, ...rates };
+  if (currency && (_rates[currency] || HARDCODED_META[currency])) {
+    _currency = currency;
+  }
 };
 
-/* ─── Read current runtime (useful for debugging / hints) ─── */
 export const getCurrencyRuntime = () => ({ currency: _currency, rates: _rates });
 
-/* ═══════════════════════════════════════════════════════════
-   formatCurrency(amountInKes) → "KSh 1,500"  or  "$11.54"
-   
-   Always pass the RAW KES amount. Conversion happens here.
-   ═══════════════════════════════════════════════════════════ */
+/* Safe accessor — tolerates new ({kesPerUnit}) and legacy (number) shapes */
+const kesPerUnitOf = (code) => {
+  const r = _rates[code];
+  if (r == null) return 1;
+  if (typeof r === 'number') return r || 1;
+  return Number(r.kesPerUnit) || 1;
+};
+
 export const formatCurrency = (amountInKes) => {
   const kes = Number(amountInKes) || 0;
-  const kesPerUnit = _rates[_currency] || 1;
-  const value = kes / kesPerUnit;
-  const meta = META[_currency] || META.KES;
+  const value = kes / kesPerUnitOf(_currency);
+  const meta = metaFor(_currency);
 
   const num = value.toLocaleString(meta.locale, {
     minimumFractionDigits: meta.decimals,
     maximumFractionDigits: meta.decimals,
   });
-
   return `${meta.symbol} ${num}`;
 };
 
-/* ═══════════════════════════════════════════════════════════
-   formatInCurrency(amountInKes, 'USD') → force a specific currency
-   Used for order-history hints ("≈ $11.54" under KSh 1,500)
-   ═══════════════════════════════════════════════════════════ */
 export const formatInCurrency = (amountInKes, code) => {
   const kes = Number(amountInKes) || 0;
-  const kesPerUnit = _rates[code] || 1;
-  const value = kes / kesPerUnit;
-  const meta = META[code] || META.KES;
+  const value = kes / kesPerUnitOf(code);
+  const meta = metaFor(code);
 
   const num = value.toLocaleString(meta.locale, {
     minimumFractionDigits: meta.decimals,
     maximumFractionDigits: meta.decimals,
   });
-
   return `${meta.symbol} ${num}`;
 };
 
-/* ─── Unchanged ─── */
 export const calcDiscounted = (price, original) =>
   original ? Math.round(((original - price) / original) * 100) : 0;

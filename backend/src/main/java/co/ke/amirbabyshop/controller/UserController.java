@@ -2,8 +2,10 @@ package co.ke.amirbabyshop.controller;
 
 import co.ke.amirbabyshop.common.exception.UnauthorizedException;
 import co.ke.amirbabyshop.common.response.ApiResponse;
+import co.ke.amirbabyshop.dto.user.UpdatePreferenceRequest;
 import co.ke.amirbabyshop.dto.user.UserDto;
 import co.ke.amirbabyshop.security.UserPrincipal;
+import co.ke.amirbabyshop.service.PreferencesService;
 import co.ke.amirbabyshop.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -18,6 +20,7 @@ import java.util.Map;
 public class UserController {
 
     private final UserService userService;
+    private final PreferencesService preferencesService;
 
     @GetMapping("/me")
     public ApiResponse<UserDto> me(@AuthenticationPrincipal UserPrincipal principal) {
@@ -43,6 +46,26 @@ public class UserController {
         userService.changePassword(principal.getId(), body.get("currentPassword"), body.get("newPassword"));
         return ApiResponse.ok("Password changed", null);
     }
+
+        /* ═══════════════ PREFERENCES (theme / language / notifications) ═══════════════ */
+
+    @GetMapping("/me/preferences")
+    public ApiResponse<Map<String, Object>> getPreferences(
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        if (principal == null) throw new UnauthorizedException("Not authenticated");
+        return ApiResponse.ok(preferencesService.get(principal.getId()));
+    }
+
+    @PatchMapping("/me/preferences")
+    public ApiResponse<Map<String, Object>> updatePreferences(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestBody UpdatePreferenceRequest req
+    ) {
+        if (principal == null) throw new UnauthorizedException("Not authenticated");
+        return ApiResponse.ok("Preferences updated", preferencesService.update(principal.getId(), req));
+    }
+
 
     /* ═══════════════ TEAM (owner only) ═══════════════ */
 

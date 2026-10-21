@@ -2,17 +2,19 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ShoppingCart, Menu, X, LogOut, LogIn, User, Heart,
   Bell, ChevronRight, Package, Star, Ticket, Info,
-  Sun, Moon,
-} from 'lucide-react';
+  Sun, Moon, Settings,
+} from 'lucide-react';                                    // ← NEW: Settings icon
 import { useEffect, useRef, useState } from 'react';
 import Logo from '../UI/Logo';
-import CurrencyToggle from '../UI/CurrencyToggle';   // 👈 NEW
+import CurrencyToggle from '../UI/CurrencyToggle';
+import CurrencyRatesModal from '../UI/CurrencyRatesModal'; // ← NEW
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
 import { useAuth } from '../../context/AuthContext';
 import { useExtras } from '../../context/ExtrasContext';
 import { useTheme } from '../../context/ThemeContext';
-import { useCurrency } from '../../context/CurrencyContext';   // 👈 NEW
+import { useCurrency } from '../../context/CurrencyContext';
+import { orderService } from '../../services/api';
 
 const NOTIF_META = {
   order:   { icon: Package, color: 'text-blue-600',   bg: 'bg-blue-50' },
@@ -26,13 +28,15 @@ export default function Header() {
   const [open, setOpen] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
   const [notifMenu, setNotifMenu] = useState(false);
+  const [ratesModalOpen, setRatesModalOpen] = useState(false);   // ← NEW
+  const [pendingOrders, setPendingOrders] = useState(0);
 
   const { count: cartCount } = useCart();
   const { count: wishlistCount } = useWishlist();
   const { user, logout, isStaff, isOwner } = useAuth();
   const { getUnreadNotifCount, getMyNotifs, markNotifRead } = useExtras();
   const { isDark, toggleTheme } = useTheme();
-  const { currency, toggle: toggleCurrency } = useCurrency();   // 👈 NEW
+  const { currency } = useCurrency();
 
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -45,13 +49,16 @@ export default function Header() {
   const showWishlist = !isStaff;
 
   useEffect(() => {
-    const handler = (e) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenu(false);
-      if (notifMenuRef.current && !notifMenuRef.current.contains(e.target)) setNotifMenu(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  const handler = (e) => {
+    if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+      const inPortal = e.target.closest('[data-currency-portal]');
+      if (!inPortal) setUserMenu(false);
+    }
+    if (notifMenuRef.current && !notifMenuRef.current.contains(e.target)) setNotifMenu(false);
+  };
+  document.addEventListener('mousedown', handler);
+  return () => document.removeEventListener('mousedown', handler);
+}, []);
 
   useEffect(() => {
     setUserMenu(false);
@@ -59,12 +66,28 @@ export default function Header() {
     setOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+  if (!isStaff || !user) { setPendingOrders(0); return; }
+  let cancelled = false;
+  const load = async () => {
+    try {
+      const count = await orderService.pendingCount();
+      if (!cancelled) setPendingOrders(Number(count) || 0);
+    } catch { /* silent */ }
+  };
+  load();
+  const id = setInterval(() => {
+    if (document.visibilityState === 'visible') load();
+  }, 30000);
+  return () => { cancelled = true; clearInterval(id); };
+}, [isStaff, user, pathname]);
+
   const navLinks = [
     { to: '/',          label: 'Home' },
     { to: '/shop',      label: 'Shop' },
     ...((!isStaff && !user) ? [{ to: '/track',     label: 'Track Order' }] : []),
     ...(!isStaff && user ? [{ to: '/my-orders', label: 'My Orders' }] : []),
-    ...(isStaff ? [{ to: '/orders',    label: 'Orders' }] : []),
+    ...(isStaff ? [{ to: '/orders', label: 'Orders', badge: pendingOrders }] : []),
     ...(!isStaff && user ? [{ to: '/returns', label: 'My Returns' }] : []),
     ...(isStaff ? [{ to: '/inventory', label: 'Inventory' }] : []),
     ...(isOwner ? [{ to: '/team',       label: 'Team' }] : []),
@@ -84,6 +107,16 @@ export default function Header() {
     logout();
     navigate('/login');
   };
+
+  /* ─── Staff click the currency row → open rate modal instead of toggling ─── */
+  // const handleCurrencyClick = () => {              // ← NEW
+  //   if (isStaff) {
+  //     setUserMenu(false);
+  //     setRatesModalOpen(true);
+  //   } else {
+  //     toggleCurrency();
+  //   }
+  // };
 
   const relTime = (iso) => {
     if (!iso) return '';
@@ -118,18 +151,23 @@ export default function Header() {
 
             {/* Center: desktop nav */}
             <nav className="hidden md:flex items-center gap-1">
-              {navLinks.map(l => (
-                <Link
-                  key={l.to}
-                  to={l.to}
-                  className={`px-4 py-2 rounded-full text-sm font-bold transition-colors ${
-                    pathname === l.to ? 'bg-amir-pink text-amir-dark' : 'text-amir-dark/70 hover:bg-amir-pink/30'
-                  }`}
-                >
-                  {l.label}
-                </Link>
-              ))}
-            </nav>
+  {navLinks.map(l => (
+    <Link
+      key={l.to}
+      to={l.to}
+      className={`px-4 py-2 rounded-full text-sm font-bold transition-colors inline-flex items-center gap-1.5 ${
+        pathname === l.to ? 'bg-amir-pink text-amir-dark' : 'text-amir-dark/70 hover:bg-amir-pink/30'
+      }`}
+    >
+      {l.label}
+      {l.badge > 0 && (
+        <span className="bg-amber-500 text-white text-[10px] font-extrabold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
+          {l.badge > 99 ? '99+' : l.badge}
+        </span>
+      )}
+    </Link>
+  ))}
+</nav>
 
             {/* Right: bell + wishlist + cart + avatar */}
             <div className="flex items-center gap-0.5 sm:gap-1">
@@ -153,7 +191,7 @@ export default function Header() {
                   </button>
 
                   {notifMenu && (
-                    <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-xl border border-amir-dark/5 overflow-hidden animate-fade-in z-50">
+                   <div className="fixed inset-x-2 top-14 sm:absolute sm:right-0 sm:top-full sm:inset-x-auto sm:mt-2 sm:w-96 bg-white rounded-2xl shadow-xl border border-amir-dark/5 overflow-hidden animate-fade-in z-50 max-h-[75vh] flex flex-col">
                       <div className="flex items-center justify-between p-3 border-b border-amir-dark/5">
                         <p className="font-black text-sm">Notifications</p>
                         {unreadCount > 0 && (
@@ -163,7 +201,7 @@ export default function Header() {
                         )}
                       </div>
 
-                      <div className="max-h-80 overflow-y-auto">
+                      <div className="flex-1 overflow-y-auto">
                         {recentNotifs.length === 0 ? (
                           <div className="p-8 text-center">
                             <Bell size={28} className="mx-auto text-gray-300 mb-2" />
@@ -249,6 +287,9 @@ export default function Header() {
                 </Link>
               )}
 
+              {/* 💱 Currency pill for logged-in customers */}
+{/* {user && !isStaff && <CurrencyToggle variant="pill" />} */}
+
               {/* 🛒 Cart */}
               <Link to="/cart" className="btn-icon w-10 h-10 sm:w-11 sm:h-11 hover:bg-amir-pink/20 relative">
                 <ShoppingCart size={18} className="sm:hidden" />
@@ -316,16 +357,20 @@ export default function Header() {
                           )}
                         </Link>
 
-                        {/* 💱 Currency toggle (logged in) */}
-                        <button
-                          onClick={toggleCurrency}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-amir-pink/20 font-bold text-sm transition-colors"
-                        >
-                          💱 {currency}
-                          <span className="ml-auto text-[10px] text-amir-dark/50 font-semibold">
-                            switch
-                          </span>
-                        </button>
+                        {/* 💱 Staff: opens rate editor. Customers: opens picker modal. */}
+{isStaff ? (
+  <button
+    onClick={() => { setUserMenu(false); setRatesModalOpen(true); }}
+    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-amir-pink/20 font-bold text-sm transition-colors"
+  >
+    <Settings size={16} /> {currency}
+    <span className="ml-auto text-[10px] text-amir-dark/50 font-semibold">edit rates</span>
+  </button>
+) : (
+  <div className="px-1">
+    <CurrencyToggle variant="row" />
+  </div>
+)}
 
                         {/* 🌙 Dark mode toggle */}
                         <button
@@ -400,17 +445,22 @@ export default function Header() {
 
             <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
               {navLinks.map(l => (
-                <Link
-                  key={l.to}
-                  to={l.to}
-                  onClick={() => setOpen(false)}
-                  className={`block px-4 py-3 rounded-2xl font-bold ${
-                    pathname === l.to ? 'bg-amir-pink/40' : 'hover:bg-amir-pink/20'
-                  }`}
-                >
-                  {l.label}
-                </Link>
-              ))}
+  <Link
+    key={l.to}
+    to={l.to}
+    onClick={() => setOpen(false)}
+    className={`flex items-center justify-between px-4 py-3 rounded-2xl font-bold ${
+      pathname === l.to ? 'bg-amir-pink/40' : 'hover:bg-amir-pink/20'
+    }`}
+  >
+    <span>{l.label}</span>
+    {l.badge > 0 && (
+      <span className="bg-amber-500 text-white text-[10px] font-extrabold rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center">
+        {l.badge > 99 ? '99+' : l.badge}
+      </span>
+    )}
+  </Link>
+))}
 
               <div className="border-t border-amir-dark/5 pt-3 mt-3">
                 {user ? (
@@ -456,8 +506,18 @@ export default function Header() {
                       </Link>
                     )}
 
-                    {/* 💱 Currency toggle (mobile drawer, logged in) */}
-                    <CurrencyToggle variant="row" />
+                    {/* 💱 Currency row — staff opens rate editor, customers get the picker modal */}
+{isStaff ? (
+  <button
+    onClick={() => { setOpen(false); setRatesModalOpen(true); }}
+    className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-amir-pink/20 font-bold"
+  >
+    <Settings size={16} /> {currency}
+    <span className="ml-auto text-[10px] text-amir-dark/50 font-semibold">edit rates</span>
+  </button>
+) : (
+  <CurrencyToggle variant="row" />
+)}
 
                     {/* 🌙 Theme toggle in mobile drawer (logged in) */}
                     <button
@@ -539,6 +599,12 @@ export default function Header() {
           </div>
         </div>
       )}
+
+      {/* 💱 Staff rate editor modal — NEW */}
+      <CurrencyRatesModal
+        open={ratesModalOpen}
+        onClose={() => setRatesModalOpen(false)}
+      />
     </>
   );
 }

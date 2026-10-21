@@ -37,6 +37,7 @@ public class OrderService {
     private final RegistryRepository registryRepository;
     private final OrderMapper orderMapper;
     private final ObjectMapper objectMapper;
+    private final NotificationService notificationService;
 
     /* ═══════════════ CREATE ═══════════════ */
 
@@ -214,6 +215,11 @@ public class OrderService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public long countPending(String tenantId) {
+        return orderRepository.countByTenantIdAndStatus(tenantId, "pending");
+    }
+
      @Transactional(readOnly = true)
     public OrderDto trackPublic(String tenantId, String query) {
         if (query == null || query.isBlank()) {
@@ -255,6 +261,13 @@ public class OrderService {
         }
         order.setStatus("confirmed");
         orderRepository.save(order);
+        notificationService.createForUser(
+    order.getUserId(),
+    "order",
+    "Order confirmed ✅",
+    "Order " + order.getId() + " has been confirmed and is being prepared.",
+    "/my-orders"
+);
         return orderMapper.toDto(order, orderItemRepository.findByOrderId(order.getId()));
     }
 
@@ -270,6 +283,13 @@ public class OrderService {
         order.setStatus("fulfilled");
         order.setPaymentStatus("paid");
         orderRepository.save(order);
+        notificationService.createForUser(
+    order.getUserId(),
+    "order",
+    "Order fulfilled 📦",
+    "Order " + order.getId() + " is on its way.",
+    "/my-orders"
+);
         return orderMapper.toDto(order, orderItemRepository.findByOrderId(order.getId()));
     }
 
@@ -284,6 +304,13 @@ public class OrderService {
         }
         order.setStatus("cancelled");
         orderRepository.save(order);
+        notificationService.createForUser(
+    order.getUserId(),
+    "order",
+    "Order cancelled",
+    "Order " + order.getId() + " has been cancelled.",
+    "/my-orders"
+);
         return orderMapper.toDto(order, orderItemRepository.findByOrderId(order.getId()));
     }
 
@@ -338,6 +365,14 @@ public class OrderService {
 
         order.setPaymentStatus(status);
         orderRepository.save(order);
+        String title = "paid".equals(status) ? "Payment received 💳" : "Payment " + status;
+notificationService.createForUser(
+    order.getUserId(),
+    "order",
+    title,
+    "Order " + order.getId() + " — payment status: " + status + ".",
+    "/my-orders"
+);
         return orderMapper.toDto(order, orderItemRepository.findByOrderId(order.getId()));
     }
 

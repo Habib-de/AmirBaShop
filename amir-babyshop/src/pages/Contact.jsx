@@ -226,24 +226,31 @@ function ContactFormModal({ user, onSend, onClose }) {
   });
   const [sent, setSent] = useState(null);
 
-  const submit = (e) => {
+    const submit = async (e) => {
     e.preventDefault();
-    const entry = onSend({ ...form, sentBy: user?.role || 'guest' });
-    try {
-      const prev = JSON.parse(localStorage.getItem('amir_feedback_ids')) || [];
-      localStorage.setItem('amir_feedback_ids', JSON.stringify([entry.id, ...prev].slice(0, 20)));
-    } catch {}
+    
+    const res = await onSend({ ...form, sentBy: user?.role || 'guest' });
+    
+    if (!res?.ok) {
+      toast.error(res?.error || 'Failed to send message');
+      return;
+    }
+
+    const entry = res.entry;
+
+    // For guests, save the IDs to localStorage so they can see their messages
+    if (!user) {
+      try {
+        const prev = JSON.parse(localStorage.getItem('amir_feedback_ids')) || [];
+        localStorage.setItem('amir_feedback_ids', JSON.stringify([entry.id, ...prev].slice(0, 20)));
+      } catch {}
+    }
+    
     setSent(entry);
-    setForm({
-      name:    user?.name  || '',
-      email:   user?.email || '',
-      subject: 'General inquiry',
-      message: '',
-    });
-    toast.success('Message sent! Check "My messages" for replies', { icon: '✉️' });
+    setForm({ ...form, message: '' });
+    toast.success('Message sent!', { icon: '✉️' });
     setTimeout(() => onClose?.(), 2500);
   };
-
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />

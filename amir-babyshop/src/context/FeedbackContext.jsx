@@ -1,85 +1,77 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { feedbackService } from '../services/api';
+import { useAuth } from './AuthContext';
 
 const FeedbackContext = createContext();
 export const useFeedback = () => useContext(FeedbackContext);
 
-const STORAGE_KEY = 'amir_feedback';
-
 export function FeedbackProvider({ children }) {
-  const [messages, setMessages] = useState(() => {
+  const { user, isStaff } = useAuth();
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+    const reload = useCallback(async () => {
+    setLoading(true);
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
-    } catch {
-      return [];
+      if (isStaff) {
+        // Staff sees ALL messages for the shop
+        const list = await feedbackService.listAll();
+        setMessages(list);
+      } else if (user?.email) {
+        // Logged-in customers see THEIR messages
+        const list = await feedbackService.listMine(user.email);
+        setMessages(list);
+      } else {
+        // Guests don't fetch from backend (they use localStorage IDs)
+        setMessages([]);
+      }
+    } catch (err) {
+      console.warn('[Feedback] load failed:', err);
+    } finally {
+      setLoading(false);
     }
-  });
+  }, [isStaff, user?.id, user?.email]);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
-  }, [messages]);
+  useEffect(() => { reload(); }, [reload]);
 
-  const sendMessage = ({ name, email, subject, message, sentBy }) => {
-    const entry = {
-      id: `FB-${Date.now().toString().slice(-6)}`,
-      createdAt: new Date().toISOString(),
-      name: (name || '').trim(),
-      email: (email || '').trim().toLowerCase(),
-      subject: (subject || 'General').trim(),
-      message: (message || '').trim(),
-      sentBy: sentBy || 'guest',
-      status: 'unread',
-      replies: [],
-    };
-    setMessages(prev => [entry, ...prev]);
-    return entry;
+  const sendMessage = async ({ name, email, subject, message, sentBy }) => {
+    try {
+      const entry = await feedbackService.create({ name, email, subject, message, sentBy });
+      setMessages(prev => [entry, ...prev]);
+      return { ok: true, entry };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   };
 
-  // ── Staff reply saved into the thread ──
-  const addReply = (id, { text, author, role }) => {
-    const reply = {
-      id: `R-${Date.now().toString().slice(-6)}`,
-      text: (text || '').trim(),
-      author: author || 'Staff',
-      role: role || 'sales',
-      createdAt: new Date().toISOString(),
-    };
-    setMessages(prev => prev.map(m =>
-      m.id === id
-        ? {
-            ...m,
-            replies: [...(m.replies || []), reply],
-            status: m.status === 'unread' ? 'read' : m.status,
-            updatedAt: new Date().toISOString(),
-          }
-        : m
-    ));
-    return reply;
+    const addReply = async (id, { text, author, role }) => {
+    try {
+      const updated = await feedbackService.reply(id, { text, author, role });
+      setMessages(prev => prev.map(m => m.id === id ? updated : m));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   };
 
-  // ── Find messages by email ──
+  const markRead = async (id) => {
+    const updated = await feedbackService.updateStatus(id, 'read');
+    setMessages(prev => prev.map(m => m.id === id ? updated : m));
+  };
+
+  const markResolved = async (id) => {
+    const updated = await feedbackService.updateStatus(id, 'resolved');
+    setMessages(prev => prev.map(m => m.id === id ? updated : m));
+  };
+
+  const deleteMessage = async (id) => {
+    setMessages(prev => prev.filter(m => m.id !== id));
+  };
+
   const findByEmail = (email) => {
     if (!email) return [];
-    const target = email.trim().toLowerCase();
-    return messages.filter(m => m.email?.toLowerCase() === target);
+    return messages.filter(m => m.email?.toLowerCase() === email.toLowerCase());
   };
-
-  // ── Find one message by its ID ──
-  const findById = (id) => {
-    if (!id) return null;
-    const target = id.trim().toLowerCase();
-    return messages.find(m => m.id.toLowerCase() === target) || null;
-  };
-
-  const markRead = (id) =>
-    setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'read' } : m));
-
-  const markResolved = (id) =>
-    setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'resolved' } : m));
-
-  const deleteMessage = (id) =>
-    setMessages(prev => prev.filter(m => m.id !== id));
-
-  const clearAll = () => setMessages([]);
 
   const counts = {
     total:    messages.length,
@@ -91,14 +83,14 @@ export function FeedbackProvider({ children }) {
   return (
     <FeedbackContext.Provider value={{
       messages,
+      loading,
+      reload,
       sendMessage,
       addReply,
-      findByEmail,
-      findById,
       markRead,
       markResolved,
       deleteMessage,
-      clearAll,
+      findByEmail,
       counts,
     }}>
       {children}

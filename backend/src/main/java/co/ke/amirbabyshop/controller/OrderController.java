@@ -69,6 +69,17 @@ public class OrderController {
         return ApiResponse.ok(orderService.listForCustomer(principal.getUsername()));
     }
 
+     /* ═══════════════ PENDING COUNT (staff only — for nav badge) ═══════════════ */
+
+    @GetMapping("/pending-count")
+    public ApiResponse<Long> pendingCount(@AuthenticationPrincipal UserPrincipal principal) {
+        if (principal == null) throw new UnauthorizedException("Not authenticated");
+        if (!"owner".equals(principal.getRole()) && !"sales".equals(principal.getRole())) {
+            return ApiResponse.ok(0L);
+        }
+        return ApiResponse.ok(orderService.countPending(principal.getTenantId()));
+    }
+
         /* ═══════════════ PUBLIC TRACKING (guests can search) ═══════════════ */
 
     @GetMapping("/track")

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { tokenStore } from '../services/api';
+import { tokenStore, wishlistService } from '../services/api';
 
 const AuthContext = createContext();
 export const useAuth = () => useContext(AuthContext);
@@ -50,6 +50,50 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (user) localStorage.setItem(SESSION_KEY, JSON.stringify(user));
     else localStorage.removeItem(SESSION_KEY);
+  }, [user]);
+
+    /* ─── One-time migration of localStorage wishlists to backend ─── */
+  const WISHLIST_MIGRATION_KEY = 'amir_wishlist_migrated_v1';
+
+  useEffect(() => {
+    if (!user) return;
+    if (localStorage.getItem(WISHLIST_MIGRATION_KEY) === 'true') return;
+
+    (async () => {
+      try {
+        const candidates = [
+          'amir_wishlist_guest',
+          `amir_wishlist_${user.email?.toLowerCase()}`,
+        ];
+        const ids = new Set();
+        for (const key of candidates) {
+          try {
+            const raw = localStorage.getItem(key);
+            if (!raw) continue;
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              parsed.forEach(p => { if (p?.id) ids.add(p.id); });
+            }
+          } catch {}
+        }
+                let anyFailed = false;
+        if (ids.size > 0) {
+          console.log('[Wishlist migration] migrating', ids.size, 'items');
+          for (const id of ids) {
+            try { await wishlistService.add(id); }
+            catch (e) { anyFailed = true; console.warn('[Wishlist migration] add failed for', id, e.message); }
+          }
+        }
+        candidates.forEach(k => localStorage.removeItem(k));
+        if (!anyFailed) {
+          localStorage.setItem(WISHLIST_MIGRATION_KEY, 'true');
+        } else {
+          console.warn('[Wishlist migration] some adds failed — will retry on next login');
+        }
+      } catch (err) {
+        console.warn('[Wishlist migration] failed:', err.message);
+      }
+    })();
   }, [user]);
 
   /* ─── On mount: verify token with backend ─── */

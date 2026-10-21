@@ -31,6 +31,7 @@ public class RegistryService {
     private final RegistryRepository registryRepository;
     private final RegistryMapper mapper;
     private final ObjectMapper objectMapper;
+    private final NotificationService notificationService;
 
     /* ═══════════════ CREATE ═══════════════ */
 
@@ -226,6 +227,23 @@ public class RegistryService {
         }
         registry.setGifts(mapper.toJson(gifts));
         registryRepository.save(registry);
+        if (thanked) {
+    for (Map<String, Object> gift : gifts) {
+        if (giftId.equals(gift.get("id"))) {
+            Object giverEmail = gift.get("giverEmail");
+            if (giverEmail != null && !String.valueOf(giverEmail).isBlank()) {
+                notificationService.createForEmail(
+                    String.valueOf(giverEmail),
+                    "info",
+                    "Your gift was marked thanked 💝",
+                    "The registry owner thanked you for your gift.",
+                    "/registry/" + registry.getSlug()
+                );
+            }
+            break;
+        }
+    }
+}
         return mapper.toDto(registry);
     }
 

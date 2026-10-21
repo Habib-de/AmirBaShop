@@ -37,6 +37,7 @@ public class ReviewService {
     private final ProductRepository productRepository;
     private final ReviewMapper mapper;
     private final ObjectMapper objectMapper;
+    private final NotificationService notificationService;
 
     /* ═══════════════ LIST ═══════════════ */
 
@@ -167,6 +168,23 @@ public class ReviewService {
 
         review.setReplies(mapper.toJson(replies));
         reviewRepository.save(review);
+        if (review.getUserId() != null) {
+    notificationService.createForUser(
+        review.getUserId(),
+        "review",
+        "Someone replied to your review 💬",
+        "Check the reply on your review of \"" + (review.getTitle() != null ? review.getTitle() : "a product") + "\".",
+        "/product/" + review.getProductId()
+    );
+} else if (review.getAuthorEmail() != null) {
+    notificationService.createForEmail(
+        review.getAuthorEmail(),
+        "review",
+        "Someone replied to your review 💬",
+        "Check the reply on your review.",
+        "/product/" + review.getProductId()
+    );
+}
         return mapper.toDto(review);
     }
 

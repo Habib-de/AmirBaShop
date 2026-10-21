@@ -25,6 +25,7 @@ public class ReturnService {
 
     private final ReturnRequestRepository returnRepository;
     private final ReturnMapper mapper;
+    private final NotificationService notificationService;
 
     @Transactional
     public ReturnDto create(String tenantId, CreateReturnRequest req) {
@@ -86,6 +87,19 @@ public class ReturnService {
         }
         
         returnRepository.save(ret);
+        String notifTitle = switch (status) {
+    case "approved" -> "Return approved ✅";
+    case "rejected" -> "Return rejected ❌";
+    case "completed" -> "Refund completed 💰";
+    default -> "Return updated";
+};
+notificationService.createForUser(
+    ret.getUserId(),
+    "info",
+    notifTitle,
+    "Return " + ret.getId() + " — status: " + status + ".",
+    "/returns"
+);
         return mapper.toDto(ret);
     }
 

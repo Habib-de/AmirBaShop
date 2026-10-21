@@ -24,7 +24,7 @@ const MOCK_MODE = {
   coupon:    false,
   review:    false,    // real ← reviews from DB
   registry:  false,   // real ← registries from DB
-  currency:  true,    // still mock
+  currency:  false,    // real mock
 };
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -323,6 +323,85 @@ export const currencyService = {
     if (MOCK_MODE.currency) return mockSetCurrency(code);
     return apiRequest('/currency/preference', { method: 'PUT', body: { code }, auth: true });
   },
+
+  /** Staff-only: update a currency rate. */
+  async updateRate(code, { kesPerUnit, symbol, label }) {
+    return apiRequest(`/currency/rates/${encodeURIComponent(code)}`, {
+      method: 'PUT',
+      body: { kesPerUnit, symbol, label },
+      auth: true,
+    });
+  },
+
+  /** Staff-only: create a new currency. */
+  async createRate({ code, kesPerUnit, symbol, label }) {
+    return apiRequest('/currency/rates', {
+      method: 'POST',
+      body: { code, kesPerUnit, symbol, label },
+      auth: true,
+    });
+  },
+};
+
+/* ═══════════════════════════════════════════════════════════
+   ❤️ WISHLIST SERVICE — real backend
+   ═══════════════════════════════════════════════════════════ */
+
+export const wishlistService = {
+  list: async () => {
+    const list = await apiRequest('/wishlist', { auth: true });
+    return (list || []).map(dto => ({
+      id: dto.productId,          // ← page expects `id`, not `productId`
+      productId: dto.productId,
+      name: dto.name,
+      image: dto.imageUrl || '',
+      price: Number(dto.price) || 0,
+      originalPrice: dto.originalPrice != null ? Number(dto.originalPrice) : null,
+      badge: dto.badge,
+      stock: dto.totalStock ?? 0,
+      categoryId: dto.categoryId,
+      addedAt: dto.addedAt,
+    }));
+  },
+  add: (productId) => apiRequest(`/wishlist/${productId}`, { method: 'POST', auth: true }),
+  remove: (productId) => apiRequest(`/wishlist/${productId}`, { method: 'DELETE', auth: true }),
+  clear: () => apiRequest('/wishlist', { method: 'DELETE', auth: true }),
+};
+
+/* ═══════════════════════════════════════════════════════════
+   ⚙️ PREFERENCES SERVICE — real backend
+   ═══════════════════════════════════════════════════════════ */
+
+export const preferencesService = {
+  get: () => apiRequest('/users/me/preferences', { auth: true }),
+  update: (patch) => apiRequest('/users/me/preferences', {
+    method: 'PATCH',
+    body: patch,
+    auth: true,
+  }),
+};
+
+/* ═══════════════════════════════════════════════════════════
+   🔔 NOTIFICATION SERVICE — real backend
+   ═══════════════════════════════════════════════════════════ */
+
+export const notificationService = {
+  list: async () => {
+    const list = await apiRequest('/notifications', { auth: true });
+    return (list || []).map(dto => ({
+      id: dto.id,
+      type: dto.type || 'info',
+      title: dto.title || '',
+      body: dto.body || '',
+      link: dto.link || null,
+      read: dto.read ?? false,
+      createdAt: dto.createdAt,
+    }));
+  },
+  markRead: (id) => apiRequest(`/notifications/${id}/read`, { method: 'PATCH', auth: true }),
+  markAllRead: () => apiRequest('/notifications/read-all', { method: 'PATCH', auth: true }),
+  remove: (id) => apiRequest(`/notifications/${id}`, { method: 'DELETE', auth: true }),
+  clearAll: () => apiRequest('/notifications', { method: 'DELETE', auth: true }),
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -983,6 +1062,10 @@ export const orderService = {
     return (list || []).map(normalizeOrder);
   },
 
+  pendingCount: async () => {
+    return apiRequest('/orders/pending-count', { auth: true });
+  },
+
    track: async (query) => {
     if (!query) return null;
     const dto = await apiRequest(`/orders/track?query=${encodeURIComponent(query)}`, { auth: false });
@@ -1095,6 +1178,46 @@ export const returnService = {
   },
 };
 
+function normalizeFeedback(dto) {
+  if (!dto) return null;
+  return {
+    id: dto.id,
+    userId: dto.userId,
+    name: dto.name,
+    email: dto.email,
+    subject: dto.subject,
+    message: dto.message,
+    sentBy: dto.sentBy,
+    status: dto.status,
+    replies: dto.replies || [],
+    createdAt: dto.createdAt,
+    updatedAt: dto.updatedAt,
+  };
+}
+
+export const feedbackService = {
+  create: async (data) => {
+    const dto = await apiRequest('/feedback', { method: 'POST', body: data, auth: true });
+    return normalizeFeedback(dto);
+  },
+  listAll: async () => {
+    const list = await apiRequest('/feedback', { auth: true });
+    return (list || []).map(normalizeFeedback);
+  },
+  listMine: async (email) => {
+    const list = await apiRequest(`/feedback/mine?email=${encodeURIComponent(email)}`, { auth: true });
+    return (list || []).map(normalizeFeedback);
+  },
+  updateStatus: async (id, status) => {
+    const dto = await apiRequest(`/feedback/${id}/status`, { method: 'PATCH', body: { status }, auth: true });
+    return normalizeFeedback(dto);
+  },
+    reply: async (id, data) => {
+    const dto = await apiRequest(`/feedback/${id}/reply`, { method: 'POST', body: data, auth: true });
+    return normalizeFeedback(dto);
+  },
+};
+
 /* ═══════════════════════════════════════════════════════════
    DEFAULT EXPORT — namespaced services
    ═══════════════════════════════════════════════════════════ */
@@ -1109,4 +1232,8 @@ export default {
   user: userService,
   tenant: tenantService,
   return: returnService,
+  feedback: feedbackService,
+  notification: notificationService,
+  wishlist: wishlistService,
+  preferences: preferencesService,
 };
