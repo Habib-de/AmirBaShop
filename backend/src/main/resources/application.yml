@@ -46,6 +46,11 @@ app:
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:4173,http://*:*}
   default-tenant: UH6Z4CXU
+  push:
+    vapid:
+      public: "BPzSLOIkNsBWxdduSfVd0E6NdjhNM0JbxOVSM_7JfIEgnhJ8So25Vq4YtCr4iOuDd2YD_qdebfMaR7aflS1tFfY"
+      private: "Vu16607UQD3ZBDjlLG1VeQVTEz7wbCOrMPOC1NSmaFA"
+    subject: "mailto:xabiiib0790@gmail.com"
 
 springdoc:
   api-docs:

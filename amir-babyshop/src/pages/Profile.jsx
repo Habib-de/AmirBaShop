@@ -8,6 +8,7 @@ import {
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { tenantService } from '../services/api';
+import EnablePushButton from '../components/UI/EnablePushButton';
 
 export default function Profile() {
   const { user, logout, updateUser, changePassword } = useAuth();
@@ -117,6 +118,22 @@ export default function Profile() {
           <ChevronRight size={18} className="text-gray-400 shrink-0" />
         </Link>
       )}
+
+            {/* Push Notifications */}
+      <div className="card p-4 mb-5 flex items-center gap-3">
+        <span className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center text-xl shrink-0">
+          🔔
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-bold text-sm text-gray-900">Push Notifications</p>
+          <p className="text-[11px] text-gray-500">
+            Get order updates and promos directly on your device
+          </p>
+        </div>
+        <div className="shrink-0">
+          <EnablePushButton compact />
+        </div>
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-1.5 mb-4">

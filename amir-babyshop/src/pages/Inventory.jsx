@@ -16,6 +16,7 @@ import { apiRequest } from '../services/api';
 import Skeleton from '../components/UI/Skeleton';
 import { useDelayedReady } from '../hooks/useDelayedReady';
 import toast from 'react-hot-toast';
+import CloudinaryUpload from '../components/UI/CloudinaryUpload';
 
 /* ═══════════════════════════════════════════════════════════
    LOCAL CACHE of categories for the Add Stock form
@@ -737,20 +738,94 @@ const buildCombos = (sizes, colors) => {
 
 const FIELD =
   'w-full px-4 py-2.5 rounded-lg border border-gray-200 focus:border-amir-pink focus:ring-2 focus:ring-amir-pink/30 outline-none text-sm font-semibold';
+  /* ═══════════════════════════════════════════════════════════
+   IMAGE PICKER — toggle between upload and paste URL
+   ═══════════════════════════════════════════════════════════ */
+function ImagePicker({ value, onChange, label = 'Image', disabled = false }) {
+  const [mode, setMode] = useState(value ? 'url' : 'upload');
+
+  useEffect(() => {
+    if (value) setMode('url');
+  }, [value]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1 p-0.5 bg-gray-100 rounded-lg w-fit">
+        <button
+          type="button"
+          onClick={() => setMode('upload')}
+          disabled={disabled}
+          className={`px-3 py-1 rounded-md text-[11px] font-bold transition-colors ${
+            mode === 'upload' ? 'bg-white text-amir-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          Upload
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('url')}
+          disabled={disabled}
+          className={`px-3 py-1 rounded-md text-[11px] font-bold transition-colors ${
+            mode === 'url' ? 'bg-white text-amir-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          Paste URL
+        </button>
+      </div>
+
+      {mode === 'upload' ? (
+        <CloudinaryUpload
+          onUpload={(url) => onChange(url)}
+          label={value ? 'Change image' : `Upload ${label.toLowerCase()}`}
+        />
+      ) : (
+  <input
+    type="url"
+    className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-amir-pink focus:ring-2 focus:ring-amir-pink/30 outline-none text-xs font-semibold"
+    placeholder="https://..."
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    disabled={disabled}
+  />
+)}
+
+      {value && (
+        <div className="flex items-center gap-2">
+          <img
+            src={value}
+            alt="preview"
+            className="w-14 h-14 rounded-lg object-cover border border-gray-200"
+            onError={(e) => { e.currentTarget.style.opacity = 0.3; }}
+          />
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            disabled={disabled}
+            className="text-[11px] font-bold text-rose-600 hover:underline"
+          >
+            Remove
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, onCancel }) {
   const isEdit = mode === 'edit';
 
   const [form, setForm] = useState(() => ({
-    name: product?.name || '',
-    categoryId: product?.categoryId || categories[0]?.id || '',
-    price: product?.price != null ? String(product.price) : '',
-    image: product?.image || '',
-    description: product?.description || '',
-    sizes: (product?.sizes || []).join(', '),
-    colors: (product?.colors || []).join(', '),
-    singleStock: product ? String(product.stock ?? 0) : '',
-  }));
+  name: product?.name || '',
+  categoryId: product?.categoryId || categories[0]?.id || '',
+  price: product?.price != null ? String(product.price) : '',
+  originalPrice: product?.originalPrice != null ? String(product.originalPrice) : '',
+  image: product?.image || '',
+  description: product?.description || '',
+  badge: product?.badge || '',
+  sizes: (product?.sizes || []).join(', '),
+  colors: (product?.colors || []).join(', '),
+  singleStock: product ? String(product.stock ?? 0) : '',
+}));
 
   // qty[variantKey] = "5"  — kept in state so values survive while you edit the size/colour lists
   const [qty, setQty] = useState(() => {
@@ -816,19 +891,21 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
     }
 
     const payload = {
-      name: form.name.trim(),
-      category: selectedCategory.slug,
-      categoryId: selectedCategory.id,
-      price: parseFloat(form.price) || 0,
-      stock,
-      image:
-        form.image.trim() ||
-        'https://images.unsplash.com/photo-1522771930-78848d9293e8?w=600',
-      description: form.description.trim(),
-      sizes: isEdit ? sizes : (sizes.length ? sizes : undefined),
-      colors: isEdit ? colors : (colors.length ? colors : undefined),
-      variants: isEdit ? variants : (variants || undefined),
-    };
+  name: form.name.trim(),
+  category: selectedCategory.slug,
+  categoryId: selectedCategory.id,
+  price: parseFloat(form.price) || 0,
+  originalPrice: form.originalPrice ? parseFloat(form.originalPrice) : null,
+  badge: form.badge.trim() || null,
+  stock,
+  image:
+    form.image.trim() ||
+    'https://images.unsplash.com/photo-1522771930-78848d9293e8?w=600',
+  description: form.description.trim(),
+  sizes: isEdit ? sizes : (sizes.length ? sizes : undefined),
+  colors: isEdit ? colors : (colors.length ? colors : undefined),
+  variants: isEdit ? variants : (variants || undefined),
+};
 
     if (!isEdit) {
       payload.rating = 5;
@@ -901,16 +978,27 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
         </select>
 
         <input
-          required
-          type="number"
-          step="0.01"
-          min="0"
-          className={FIELD}
-          placeholder="Price (KES) *"
-          value={form.price}
-          onChange={e => setForm({ ...form, price: e.target.value })}
-          disabled={submitting}
-        />
+  required
+  type="number"
+  step="0.01"
+  min="0"
+  className={FIELD}
+  placeholder="Price (KES) *"
+  value={form.price}
+  onChange={e => setForm({ ...form, price: e.target.value })}
+  disabled={submitting}
+/>
+
+<input
+  type="number"
+  step="0.01"
+  min="0"
+  className={FIELD}
+  placeholder="Original price (optional — for discount)"
+  value={form.originalPrice}
+  onChange={e => setForm({ ...form, originalPrice: e.target.value })}
+  disabled={submitting}
+/>
 
         <input
           className={FIELD}
@@ -946,14 +1034,14 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
                   return (
                     <div key={color} className="flex items-center gap-2">
                       <span className="w-20 shrink-0 text-xs font-bold text-gray-700 truncate">{color}</span>
-                      <input
-                        type="url"
-                        className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-gray-200 focus:border-amir-pink outline-none text-xs font-semibold bg-white"
-                        placeholder={`Image URL for ${color}`}
-                        value={imgs[first?.key] || ''}
-                        onChange={e => setColorImage(color, e.target.value)}
-                        disabled={submitting}
-                      />
+                      <div className="flex-1 min-w-0">
+  <ImagePicker
+    label={`${color} photo`}
+    value={imgs[first?.key] || ''}
+    onChange={(url) => setColorImage(color, url)}
+    disabled={submitting}
+  />
+</div>
                     </div>
                   );
                 })}
@@ -991,14 +1079,12 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
                         disabled={submitting}
                       />
                     </div>
-                    <input
-                      type="url"
-                      className="w-full px-2.5 py-1.5 rounded-md border border-gray-200 focus:border-amir-pink outline-none text-[11px] font-semibold bg-gray-50"
-                      placeholder="Image URL for this exact variant (optional)"
-                      value={imgs[c.key] || ''}
-                      onChange={e => setImgs(m => ({ ...m, [c.key]: e.target.value }))}
-                      disabled={submitting}
-                    />
+                    <ImagePicker
+  label={`${label || 'variant'} photo`}
+  value={imgs[c.key] || ''}
+  onChange={(url) => setImgs(m => ({ ...m, [c.key]: url }))}
+  disabled={submitting}
+/>
                   </div>
                 );
               })}
@@ -1017,13 +1103,22 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
           />
         )}
 
-        <input
-          className={`${FIELD} sm:col-span-2`}
-          placeholder="Image URL (optional)"
-          value={form.image}
-          onChange={e => setForm({ ...form, image: e.target.value })}
-          disabled={submitting}
-        />
+        <div className="sm:col-span-2">
+  <ImagePicker
+    label="Main product image"
+    value={form.image}
+    onChange={(url) => setForm({ ...form, image: url })}
+    disabled={submitting}
+  />
+</div>
+
+<input
+  className={FIELD}
+  placeholder='Badge (optional — "New", "Best Seller", "Sale")'
+  value={form.badge}
+  onChange={e => setForm({ ...form, badge: e.target.value })}
+  disabled={submitting}
+/>
 
         <textarea
           required

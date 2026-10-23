@@ -404,6 +404,34 @@ export const notificationService = {
   clearAll: () => apiRequest('/notifications', { method: 'DELETE', auth: true }),
 };
 
+
+/* ═══════════════════════════════════════════════════════════
+   🔔 STOCK ALERTS — real backend
+   ═══════════════════════════════════════════════════════════ */
+
+export const stockAlertService = {
+  subscribe: async ({ productId, size, color, email }) => {
+    return apiRequest('/stock-alerts', {
+      method: 'POST',
+      body: { productId, size, color, email },
+      auth: true,   // attach token if logged in; server overrides email
+    });
+  },
+  mine: async () => {
+    const list = await apiRequest('/stock-alerts/mine', { auth: true });
+    return (list || []).map(dto => ({
+      id: dto.id,
+      productId: dto.productId,
+      size: dto.size,
+      color: dto.color,
+      email: dto.email,
+      notified: dto.notified,
+      notifiedAt: dto.notifiedAt,
+      createdAt: dto.createdAt,
+    }));
+  },
+};
+
 /* ═══════════════════════════════════════════════════════════
    📦 INVENTORY SERVICE — real backend
    ═══════════════════════════════════════════════════════════ */
@@ -1236,4 +1264,5 @@ export default {
   notification: notificationService,
   wishlist: wishlistService,
   preferences: preferencesService,
+  stockAlert: stockAlertService,
 };

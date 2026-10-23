@@ -264,6 +264,48 @@ export function InventoryProvider({ children }) {
     [products]
   );
 
+    /* Variants with 0 stock — one entry per (product, size, color) */
+  const soldOutVariants = useMemo(() => {
+    const list = [];
+    for (const p of products) {
+      if (!p.variants || Object.keys(p.variants).length === 0) {
+        if ((p.stock ?? 0) === 0) {
+          list.push({
+            productId: p.id,
+            name: p.name,
+            image: p.image,
+            size: null,
+            color: null,
+          });
+        }
+        continue;
+      }
+      for (const [key, v] of Object.entries(p.variants)) {
+        if ((v?.stock ?? 0) === 0) {
+          const { size, color } = parseVariantKey(p, key);
+          list.push({
+            productId: p.id,
+            name: p.name,
+            image: p.image,
+            size,
+            color,
+          });
+        }
+      }
+    }
+    return list;
+  }, [products]);
+
+  /* Products that have at least one sold-out variant */
+  const productsWithSoldOutVariants = useMemo(() => {
+    return products.filter(p => {
+      if (!p.variants || Object.keys(p.variants).length === 0) {
+        return (p.stock ?? 0) === 0;
+      }
+      return Object.values(p.variants).some(v => (v?.stock ?? 0) === 0);
+    });
+  }, [products]);
+
   const totalValue = useMemo(
     () => products.reduce((sum, p) => sum + (p.price || 0) * getTotalStock(p), 0),
     [products]
@@ -284,6 +326,8 @@ export function InventoryProvider({ children }) {
       deleteProduct,
       lowStock,
       outOfStock,
+      soldOutVariants,
+      productsWithSoldOutVariants,
       totalValue,
     }}>
       {children}

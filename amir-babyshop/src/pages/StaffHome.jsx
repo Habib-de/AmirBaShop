@@ -17,7 +17,7 @@ import Skeleton from '../components/UI/Skeleton';
 import { useDelayedReady } from '../hooks/useDelayedReady';
 
 export default function StaffHome() {
-  const { products, lowStock, outOfStock, totalValue } = useInventory();
+  const { products, lowStock, outOfStock, soldOutVariants, totalValue } = useInventory();
   const { counts: orderCounts, revenue, orders } = useOrders();
   const { counts: feedbackCounts, messages } = useFeedback();
   const { reviews, getStats } = useReviews();
@@ -163,6 +163,16 @@ export default function StaffHome() {
       icon: AlertTriangle,
       title: `${outOfStock.length} out-of-stock item${outOfStock.length !== 1 ? 's' : ''}`,
       sub: 'Customers can\'t buy these',
+      to: '/inventory',
+      color: 'rose',
+    },
+        soldOutVariants.length > 0 && {
+      icon: AlertTriangle,
+      title: `${soldOutVariants.length} sold-out variant${soldOutVariants.length !== 1 ? 's' : ''}`,
+      sub: soldOutVariants
+        .slice(0, 3)
+        .map(v => `${v.name}${v.size || v.color ? ` · ${[v.size, v.color].filter(Boolean).join(' ')}` : ''}`)
+        .join(', ') + (soldOutVariants.length > 3 ? ` +${soldOutVariants.length - 3} more` : ''),
       to: '/inventory',
       color: 'rose',
     },

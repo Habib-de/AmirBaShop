@@ -41,6 +41,7 @@ public class ProductService {
     private final CategoryRepository categoryRepository;
     private final ProductMapper mapper;
     private final ObjectMapper objectMapper;
+    private final StockAlertService stockAlertService;
 
     /* ═══════════════ READ ═══════════════ */
 
@@ -229,7 +230,7 @@ public class ProductService {
 
     /* ═══════════════ VARIANT STOCK ═══════════════ */
 
-    /** Set one variant's stock to an exact number. */
+        /** Set one variant's stock to an exact number. */
     @Transactional
     public ProductDto setVariantStock(String tenantId, String role, Long id,
                                       String size, String color, int stock) {
@@ -239,14 +240,29 @@ public class ProductService {
         Map<String, Map<String, Object>> variants = readVariants(product);
         String key = variantKey(size, color);
 
+        int previousStock = toInt(
+                variants.getOrDefault(key, new LinkedHashMap<>()).get("stock"));
+
         Map<String, Object> entry = new LinkedHashMap<>(variants.getOrDefault(key, new LinkedHashMap<>()));
         entry.put("stock", Math.max(0, stock));
         variants.put(key, entry);
 
-        return saveVariants(product, variants);
+        ProductDto dto = saveVariants(product, variants);
+
+        // 0 → positive = restock: notify subscribers
+        if (previousStock == 0 && stock > 0) {
+            try {
+                stockAlertService.notifyRestock(tenantId, id, size, color, product.getName());
+            } catch (Exception e) {
+                // Non-fatal — never fail a stock update because of notification errors
+                System.err.println("[ProductService] notifyRestock failed: " + e.getMessage());
+            }
+        }
+
+        return dto;
     }
 
-    /** Add (positive delta) or remove (negative delta) units from one variant. */
+        /** Add (positive delta) or remove (negative delta) units from one variant. */
     @Transactional
     public ProductDto adjustVariantStock(String tenantId, String role, Long id,
                                          String size, String color, int delta) {
@@ -261,7 +277,8 @@ public class ProductService {
             throw new ApiException("Variant not found: " + key, HttpStatus.NOT_FOUND);
         }
 
-        int next = toInt(existing.get("stock")) + delta;
+        int previousStock = toInt(existing.get("stock"));
+        int next = previousStock + delta;
         if (next < 0) {
             throw new ApiException("Insufficient stock for " + key, HttpStatus.UNPROCESSABLE_ENTITY);
         }
@@ -270,7 +287,18 @@ public class ProductService {
         entry.put("stock", next);
         variants.put(key, entry);
 
-        return saveVariants(product, variants);
+        ProductDto dto = saveVariants(product, variants);
+
+        // 0 → positive = restock: notify subscribers
+        if (previousStock == 0 && next > 0) {
+            try {
+                stockAlertService.notifyRestock(tenantId, id, size, color, product.getName());
+            } catch (Exception e) {
+                System.err.println("[ProductService] notifyRestock failed: " + e.getMessage());
+            }
+        }
+
+        return dto;
     }
 
     /* ═══════════════ DELETE ═══════════════ */

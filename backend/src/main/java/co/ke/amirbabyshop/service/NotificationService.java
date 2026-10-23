@@ -19,6 +19,7 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
+    private final PushService pushService;
 
     @Transactional(readOnly = true)
     public List<NotificationDto> listMine(Long userId) {
@@ -85,6 +86,12 @@ public class NotificationService {
                 .isRead(false)
                 .build();
         notificationRepository.save(n);
+        // Send push notification to all subscribed devices
+        try {
+            pushService.sendPushToUser(userId, title, body, link != null ? link : "/");
+        } catch (Exception e) {
+            System.err.println("[NotificationService] Push failed: " + e.getMessage());
+        }
     }
 
     @Transactional

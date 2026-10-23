@@ -243,7 +243,7 @@ export default function ProductPage() {
     toast.success('Opening WhatsApp…', { icon: '📤' });
   };
 
-  const handleSubscribe = (e) => {
+    const handleSubscribe = async (e) => {
     e.preventDefault();
     const clean = notifyEmail.trim().toLowerCase();
 
@@ -252,7 +252,7 @@ export default function ProductPage() {
       return;
     }
 
-    const res = subscribeToStock({
+    const res = await subscribeToStock({
       productId: product.id,
       productName: product.name,
       size,
@@ -261,7 +261,7 @@ export default function ProductPage() {
     });
 
     if (!res.ok) {
-      toast.error(res.error);
+      toast.error(res.error || 'Could not subscribe');
       return;
     }
 

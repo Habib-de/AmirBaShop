@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuth } from './AuthContext';
-import { couponService, returnService, notificationService } from '../services/api';
+import { couponService, returnService, notificationService, stockAlertService } from '../services/api';
 import { SIZE_GUIDES } from '../data/sizeGuides';
 
 const ExtrasContext = createContext();
@@ -12,7 +12,6 @@ export const useExtras = () => useContext(ExtrasContext);
 const RETURNS_KEY       = 'amir_returns';
 // const NOTIFS_KEY        = 'amir_notifications';
 const APPLIED_KEY       = 'amir_applied_coupon';
-const STOCK_ALERTS_KEY  = 'amir_stock_alerts';
 
 /* ═══════════════════════════════════════════════════════════
    HELPERS
@@ -48,10 +47,8 @@ export function ExtrasProvider({ children }) {
   /* ─── NOTIFICATIONS ─── */
   const [notifications, setNotifications] = useState([]);
 
-  /* ─── STOCK ALERTS ─── */
-  const [stockAlerts, setStockAlerts] = useState(() =>
-    safeParse(localStorage.getItem(STOCK_ALERTS_KEY), [])
-  );
+    /* ─── STOCK ALERTS (server-backed) ─── */
+  const [stockAlerts, setStockAlerts] = useState([]);
 
   /* ─── APPLIED COUPON (per user) ─── */
   const appliedKey = userKey(APPLIED_KEY, user);
@@ -81,7 +78,7 @@ export function ExtrasProvider({ children }) {
 
   /* ─── Persist ─── */
   
-  useEffect(() => { localStorage.setItem(STOCK_ALERTS_KEY, JSON.stringify(stockAlerts)); }, [stockAlerts]);
+  
 
   useEffect(() => {
     setAppliedCoupon(safeParse(localStorage.getItem(appliedKey), null));
@@ -305,66 +302,50 @@ const clearNotifs = useCallback(async () => {
   } catch (err) { console.warn('[Notifications] clearAll failed:', err.message); }
 }, []);
 
-  /* ═══════════════════════════════════════════════════════════
-     🔔 STOCK ALERTS — unchanged
+    /* ═══════════════════════════════════════════════════════════
+     🔔 STOCK ALERTS — server-backed
      ═══════════════════════════════════════════════════════════ */
-  const subscribeToStock = ({ productId, productName, size, color, email }) => {
-    if (!email) return { ok: false, error: 'Email required' };
-    const cleanEmail = email.trim().toLowerCase();
-
-    const exists = stockAlerts.some(a =>
-      a.productId === productId &&
-      a.size === (size || null) &&
-      a.color === (color || null) &&
-      a.email === cleanEmail &&
-      !a.notifiedAt
-    );
-    if (exists) {
-      return { ok: false, error: 'You\'re already subscribed for this variant' };
+  const loadStockAlerts = useCallback(async () => {
+    if (!user) { setStockAlerts([]); return; }
+    try {
+      const list = await stockAlertService.mine();
+      setStockAlerts(list);
+    } catch (err) {
+      console.warn('[StockAlerts] load failed:', err.message);
+      setStockAlerts([]);
     }
+  }, [user]);
 
-    const alert = {
-      id: `SA-${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 6)}`,
-      productId,
-      productName,
-      size: size || null,
-      color: color || null,
-      email: cleanEmail,
-      createdAt: new Date().toISOString(),
-      notifiedAt: null,
-    };
-    setStockAlerts(prev => [alert, ...prev]);
-    return { ok: true, alert };
-  };
+  useEffect(() => { loadStockAlerts(); }, [loadStockAlerts]);
+
+  const subscribeToStock = useCallback(async ({ productId, size, color, email }) => {
+    if (!email) return { ok: false, error: 'Email required' };
+    try {
+      const created = await stockAlertService.subscribe({ productId, size, color, email });
+      setStockAlerts(prev => [created, ...prev]);
+      return { ok: true, alert: created };
+    } catch (err) {
+      return { ok: false, error: err.message || 'Could not subscribe' };
+    }
+  }, []);
 
   const getSubscribersForVariant = (productId, size, color) => {
     return stockAlerts.filter(a =>
       a.productId === productId &&
-      a.size === (size || null) &&
-      a.color === (color || null) &&
-      !a.notifiedAt
+      (a.size || null) === (size || null) &&
+      (a.color || null) === (color || null) &&
+      !a.notified
     ).length;
   };
 
-  const notifyStockRestored = (productId, size, color, productName) => {
-  const matching = stockAlerts.filter(a =>
-    a.productId === productId &&
-    a.size === (size || null) &&
-    a.color === (color || null) &&
-    !a.notifiedAt
-  );
-  if (matching.length === 0) return 0;
+  /* Restock notifications fire from the backend (ProductService → StockAlertService).
+     Frontend just refreshes the list. */
+  const notifyStockRestored = async () => {
+    await loadStockAlerts();
+    return 0;
+  };
 
-  const ids = new Set(matching.map(m => m.id));
-  setStockAlerts(prev => prev.map(a =>
-    ids.has(a.id) ? { ...a, notifiedAt: new Date().toISOString() } : a
-  ));
-
-  return matching.length;
-};
-
-  const getPendingAlerts = () =>
-    stockAlerts.filter(a => !a.notifiedAt);
+  const getPendingAlerts = () => stockAlerts.filter(a => !a.notified);
 
   /* ═══════════════════════════════════════════════════════════
      CONTEXT VALUE
@@ -390,8 +371,8 @@ const clearNotifs = useCallback(async () => {
       markNotifRead, markAllNotifsRead, clearNotifs,
       getMyNotifs, getUnreadNotifCount,
 
-      /* 🔔 Stock Alerts */
-      stockAlerts,
+            /* 🔔 Stock Alerts */
+      stockAlerts, reloadStockAlerts: loadStockAlerts,
       subscribeToStock,
       getSubscribersForVariant,
       notifyStockRestored,

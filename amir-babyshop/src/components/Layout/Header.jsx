@@ -2,12 +2,13 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ShoppingCart, Menu, X, LogOut, LogIn, User, Heart,
   Bell, ChevronRight, Package, Star, Ticket, Info,
-  Sun, Moon, Settings,
+  Sun, Moon, Settings, Coins,
 } from 'lucide-react';                                    // ← NEW: Settings icon
 import { useEffect, useRef, useState } from 'react';
 import Logo from '../UI/Logo';
 import CurrencyToggle from '../UI/CurrencyToggle';
 import CurrencyRatesModal from '../UI/CurrencyRatesModal'; // ← NEW
+import EnablePushButton from '../UI/EnablePushButton';
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
 import { useAuth } from '../../context/AuthContext';
@@ -30,6 +31,7 @@ export default function Header() {
   const [notifMenu, setNotifMenu] = useState(false);
   const [ratesModalOpen, setRatesModalOpen] = useState(false);   // ← NEW
   const [pendingOrders, setPendingOrders] = useState(0);
+  const [notifSettings, setNotifSettings] = useState(false);
 
   const { count: cartCount } = useCart();
   const { count: wishlistCount } = useWishlist();
@@ -190,80 +192,123 @@ export default function Header() {
                     )}
                   </button>
 
-                  {notifMenu && (
-                   <div className="fixed inset-x-2 top-14 sm:absolute sm:right-0 sm:top-full sm:inset-x-auto sm:mt-2 sm:w-96 bg-white rounded-2xl shadow-xl border border-amir-dark/5 overflow-hidden animate-fade-in z-50 max-h-[75vh] flex flex-col">
+                                    {notifMenu && (
+                    <div className="fixed inset-x-2 top-14 sm:absolute sm:right-0 sm:top-full sm:inset-x-auto sm:mt-2 sm:w-96 bg-white rounded-2xl shadow-xl border border-amir-dark/5 overflow-hidden animate-fade-in z-50 max-h-[75vh] flex flex-col">
+                      
+                      {/* Header */}
                       <div className="flex items-center justify-between p-3 border-b border-amir-dark/5">
-                        <p className="font-black text-sm">Notifications</p>
-                        {unreadCount > 0 && (
-                          <span className="text-[10px] bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded-full">
-                            {unreadCount} new
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {notifSettings && (
+                            <button 
+                              onClick={() => setNotifSettings(false)}
+                              className="text-gray-500 hover:text-amir-dark p-1"
+                            >
+                              ←
+                            </button>
+                          )}
+                          <p className="font-black text-sm">
+                            {notifSettings ? 'Notification Settings' : 'Notifications'}
+                          </p>
+                        </div>
+                        
+                        <div className="flex items-center gap-1">
+                          {!notifSettings && unreadCount > 0 && (
+                            <span className="text-[10px] bg-amber-500 text-white font-extrabold px-2 py-0.5 rounded-full">
+                              {unreadCount} new
+                            </span>
+                          )}
+                          
+                          {!notifSettings && (
+                            <button 
+                              onClick={() => setNotifSettings(true)}
+                              className="p-1.5 text-gray-400 hover:text-amir-dark hover:bg-gray-100 rounded-full transition-colors"
+                              title="Notification Settings"
+                            >
+                              <Settings size={14} />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="flex-1 overflow-y-auto">
-                        {recentNotifs.length === 0 ? (
-                          <div className="p-8 text-center">
-                            <Bell size={28} className="mx-auto text-gray-300 mb-2" />
-                            <p className="text-xs font-bold text-gray-600">No notifications yet</p>
-                            <p className="text-[10px] text-gray-400 mt-0.5">
-                              We'll let you know when something happens
-                            </p>
+                      {/* Body: Settings OR Notifications List */}
+                      {notifSettings ? (
+                        <div className="p-4 flex flex-col items-center justify-center text-center">
+                          <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center mb-3">
+                            <Bell className="text-amber-500" size={24} />
                           </div>
-                        ) : (
-                          recentNotifs.map(n => {
-                            const meta = NOTIF_META[n.type] || NOTIF_META.info;
-                            const Icon = meta.icon;
-                            const Wrapper = n.link ? Link : 'div';
-                            const wrapperProps = n.link
-                              ? {
-                                  to: n.link,
-                                  onClick: () => {
-                                    markNotifRead(n.id);
-                                    setNotifMenu(false);
-                                  },
-                                }
-                              : {};
+                          <p className="text-sm font-bold text-amir-dark mb-1">Push Notifications</p>
+                          <p className="text-xs text-amir-dark/60 mb-4 px-2">
+                            Get order updates and promos directly on your device
+                          </p>
+                          <EnablePushButton />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex-1 overflow-y-auto">
+                            {recentNotifs.length === 0 ? (
+                              <div className="p-8 text-center">
+                                <Bell size={28} className="mx-auto text-gray-300 mb-2" />
+                                <p className="text-xs font-bold text-gray-600">No notifications yet</p>
+                                <p className="text-[10px] text-gray-400 mt-0.5">
+                                  We'll let you know when something happens
+                                </p>
+                              </div>
+                            ) : (
+                              recentNotifs.map(n => {
+                                const meta = NOTIF_META[n.type] || NOTIF_META.info;
+                                const Icon = meta.icon;
+                                const Wrapper = n.link ? Link : 'div';
+                                const wrapperProps = n.link
+                                  ? {
+                                      to: n.link,
+                                      onClick: () => {
+                                        markNotifRead(n.id);
+                                        setNotifMenu(false);
+                                      },
+                                    }
+                                  : {};
 
-                            return (
-                              <Wrapper
-                                key={n.id}
-                                {...wrapperProps}
-                                className={`flex items-start gap-2.5 p-3 border-b border-amir-dark/5 last:border-b-0 transition-colors ${
-                                  !n.read ? 'bg-amber-50/50 hover:bg-amber-50' : 'hover:bg-gray-50'
-                                } ${n.link ? 'cursor-pointer' : ''}`}
-                              >
-                                <div className={`w-8 h-8 rounded-lg ${meta.bg} ${meta.color} flex items-center justify-center shrink-0`}>
-                                  <Icon size={14} />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className={`text-xs leading-tight truncate ${
-                                    !n.read ? 'font-black text-amir-dark' : 'font-semibold text-amir-dark/80'
-                                  }`}>
-                                    {n.title}
-                                  </p>
-                                  {n.body && (
-                                    <p className="text-[10px] text-amir-dark/50 line-clamp-1 mt-0.5">
-                                      {n.body}
-                                    </p>
-                                  )}
-                                </div>
-                                <span className="text-[9px] text-amir-dark/40 font-semibold shrink-0">
-                                  {relTime(n.createdAt)}
-                                </span>
-                              </Wrapper>
-                            );
-                          })
-                        )}
-                      </div>
+                                return (
+                                  <Wrapper
+                                    key={n.id}
+                                    {...wrapperProps}
+                                    className={`flex items-start gap-2.5 p-3 border-b border-amir-dark/5 last:border-b-0 transition-colors ${
+                                      !n.read ? 'bg-amber-50/50 hover:bg-amber-50' : 'hover:bg-gray-50'
+                                    } ${n.link ? 'cursor-pointer' : ''}`}
+                                  >
+                                    <div className={`w-8 h-8 rounded-lg ${meta.bg} ${meta.color} flex items-center justify-center shrink-0`}>
+                                      <Icon size={14} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className={`text-xs leading-tight truncate ${
+                                        !n.read ? 'font-black text-amir-dark' : 'font-semibold text-amir-dark/80'
+                                      }`}>
+                                        {n.title}
+                                      </p>
+                                      {n.body && (
+                                        <p className="text-[10px] text-amir-dark/50 line-clamp-1 mt-0.5">
+                                          {n.body}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <span className="text-[9px] text-amir-dark/40 font-semibold shrink-0">
+                                      {relTime(n.createdAt)}
+                                    </span>
+                                  </Wrapper>
+                                );
+                              })
+                            )}
+                          </div>
 
-                      <Link
-                        to="/notifications"
-                        onClick={() => setNotifMenu(false)}
-                        className="flex items-center justify-center gap-1 p-3 border-t border-amir-dark/5 text-xs font-bold text-amir-dark hover:bg-amir-pink/20 transition-colors"
-                      >
-                        View all notifications <ChevronRight size={12} />
-                      </Link>
+                          <Link
+                            to="/notifications"
+                            onClick={() => setNotifMenu(false)}
+                            className="flex items-center justify-center gap-1 p-3 border-t border-amir-dark/5 text-xs font-bold text-amir-dark hover:bg-amir-pink/20 transition-colors"
+                          >
+                            View all notifications <ChevronRight size={12} />
+                          </Link>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -331,7 +376,7 @@ export default function Header() {
                           <User size={16} /> My Profile
                         </Link>
 
-                        {showWishlist && (
+                        {/* {showWishlist && (
                           <Link
                             to="/wishlist"
                             className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-rose-50 font-bold text-sm"
@@ -355,7 +400,7 @@ export default function Header() {
                               {unreadCount}
                             </span>
                           )}
-                        </Link>
+                        </Link> */}
 
                         {/* 💱 Staff: opens rate editor. Customers: opens picker modal. */}
 {isStaff ? (
@@ -363,7 +408,7 @@ export default function Header() {
     onClick={() => { setUserMenu(false); setRatesModalOpen(true); }}
     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-amir-pink/20 font-bold text-sm transition-colors"
   >
-    <Settings size={16} /> {currency}
+    <Coins size={16} /> {currency}
     <span className="ml-auto text-[10px] text-amir-dark/50 font-semibold">edit rates</span>
   </button>
 ) : (

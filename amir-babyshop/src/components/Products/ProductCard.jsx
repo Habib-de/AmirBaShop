@@ -54,9 +54,9 @@ export default function ProductCard({ product }) {
   return (
     <div className="card group flex flex-col animate-fade-in">
       <Link
-        to={detailUrl}
-        className="relative block aspect-square overflow-hidden bg-amir-cream"
-      >
+  to={detailUrl}
+  className="relative block aspect-square md:aspect-[5/4] overflow-hidden bg-amir-cream"
+>
         <img
           src={product.image}
           alt={product.name}
@@ -98,17 +98,17 @@ export default function ProductCard({ product }) {
         </button>
       </Link>
 
-      <div className="p-2 sm:p-4 flex flex-col flex-1">
+      <div className="p-2 md:p-3 flex flex-col flex-1">
         <Link to={detailUrl}>
-          <h3 className="font-bold text-[13px] sm:text-base leading-tight line-clamp-2 min-h-[2rem] sm:min-h-[2.5rem] hover:text-amir-dark/70">
-            {product.name}
-          </h3>
+          <h3 className="font-bold text-[13px] md:text-sm leading-tight line-clamp-2 hover:text-amir-dark/70">
+  {product.name}
+</h3>
           <div className="mt-1">
             <LiveRating product={product} size={11} />
           </div>
         </Link>
 
-        <div className="mt-0.5 sm:mt-2 flex items-end justify-between gap-1.5">
+        <div className="mt-1 md:mt-1.5 flex items-end justify-between gap-1.5">
           <div className="flex flex-col leading-none min-w-0">
             <span className="font-extrabold text-sm sm:text-lg text-amir-dark truncate">
               {formatCurrency(product.price)}
@@ -123,7 +123,7 @@ export default function ProductCard({ product }) {
           <button
             onClick={handleAdd}
             disabled={outOfStock}
-            className={`btn-icon w-8 h-8 sm:w-11 sm:h-11 shadow-sm active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed shrink-0 transition-colors ${
+            className={`btn-icon w-8 h-8 md:w-9 md:h-9 shadow-sm active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed shrink-0 transition-colors ${
               justAdded
                 ? 'bg-emerald-400 text-white'
                 : 'bg-amir-pink hover:bg-pink-400 text-amir-dark'
