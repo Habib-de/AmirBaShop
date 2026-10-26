@@ -20,6 +20,7 @@ import Shop from './pages/Shop';
 import ProductPage from './pages/ProductPage';
 import CartPage from './pages/CartPage';
 import Checkout from './pages/Checkout';
+import PayOrder from './pages/PayOrder';
 import Contact from './pages/Contact';
 import TrackOrder from './pages/TrackOrder';
 import MyOrders from './pages/MyOrders';
@@ -70,6 +71,7 @@ function AppContent() {
                             <Route path="/product/:id"  element={<ProductPage />} />
                             <Route path="/cart"         element={<CartPage />} />
                             <Route path="/checkout"     element={<Checkout />} />
+                            <Route path="/pay/:orderId" element={<PayOrder />} />
                             <Route path="/contact"      element={<Contact />} />
                             <Route path="/track"        element={<TrackOrder />} />
                             <Route path="/my-orders"    element={<MyOrders />} />

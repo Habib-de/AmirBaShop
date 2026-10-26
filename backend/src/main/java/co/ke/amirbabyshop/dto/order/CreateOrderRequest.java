@@ -38,7 +38,26 @@ public class CreateOrderRequest {
     @Size(max = 20)
     private String addressZip;
 
-    private String paymentMethod = "card";   // card | cod | momo | mpesa
+         private String paymentMethod = "mpesa";  // cod | momo | mpesa
+
+    /** For M-Pesa orders: which sub-flow the customer picked.
+        'manual_paybill' or 'stk_push'. Defaults to 'manual_paybill'. */
+    private String paymentFlow;
+
+    /**
+     * STAFF-ONLY — ignored for customer/guest orders (backend forces 'unpaid').
+     * Values: 'paid' | 'unpaid'.
+     * Used when a staff member (owner/sales) records a walk-in or phone order
+     * and the customer has already paid.
+     */
+    private String paymentStatus;
+
+    /**
+     * STAFF-ONLY — only used when paymentStatus='paid' AND paymentMethod='mpesa'.
+     * The M-Pesa confirmation code (e.g. "SGH1ABCDEFG").
+     * Ignored for customer/guest orders.
+     */
+    private String mpesaReceiptCode;
 
     private String couponCode;               // optional
 

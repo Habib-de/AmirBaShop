@@ -22,4 +22,6 @@ public interface OrderRepository extends JpaRepository<Order, String> {
     Optional<Order> findByTenantIdAndTrackingNumber(String tenantId, String trackingNumber);
     
     long countByTenantIdAndStatus(String tenantId, String status); 
+    
+    Optional<Order> findByMpesaCheckoutRequestId(String checkoutRequestId);
 }

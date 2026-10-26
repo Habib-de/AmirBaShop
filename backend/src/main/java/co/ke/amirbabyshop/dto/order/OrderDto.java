@@ -40,9 +40,12 @@ public class OrderDto {
     private String addressCity;
     private String addressZip;
 
-    /* Payment */
+        /* Payment */
     private String paymentMethod;
     private String paymentStatus;
+    private String paymentFlow;             // 'manual_paybill' | 'stk_push' | 'cod'
+    private String mpesaReceiptCode;        // set once paid via M-Pesa
+    private String mpesaCheckoutRequestId;  // Daraja's checkout ID (may expose to client for debugging)
 
     /* Tracking */
     private String carrierId;

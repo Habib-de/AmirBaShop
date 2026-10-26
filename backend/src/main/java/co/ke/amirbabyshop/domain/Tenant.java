@@ -55,8 +55,15 @@ public class Tenant {
     @Column(precision = 10, scale = 7)
     private BigDecimal lng;
 
-    @Column(length = 3, columnDefinition = "CHAR(3)")
+        @Column(length = 3, columnDefinition = "CHAR(3)")
     private String currency;
+
+    /* ─── M-Pesa payment details (used by checkout) ─── */
+    @Column(name = "mpesa_paybill", length = 20)
+    private String mpesaPaybill;
+
+    @Column(name = "mpesa_account_prefix", length = 20)
+    private String mpesaAccountPrefix;
 
     @Column(length = 20, columnDefinition = "ENUM('active','suspended','closed')")
     private String status;

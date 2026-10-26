@@ -46,6 +46,15 @@ app:
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:4173,http://*:*}
   default-tenant: UH6Z4CXU
+  payments:
+    mpesa:
+      enabled: true
+      env: sandbox
+      consumer-key: ${MPESA_CONSUMER_KEY:}
+      consumer-secret: ${MPESA_CONSUMER_SECRET:}
+      shortcode: ${MPESA_SHORTCODE:174379}
+      passkey: ${MPESA_PASSKEY:}
+      callback-url: ${MPESA_CALLBACK_URL:http://localhost:8080/api/payments/mpesa/callback}
   push:
     vapid:
       public: "BPzSLOIkNsBWxdduSfVd0E6NdjhNM0JbxOVSM_7JfIEgnhJ8So25Vq4YtCr4iOuDd2YD_qdebfMaR7aflS1tFfY"

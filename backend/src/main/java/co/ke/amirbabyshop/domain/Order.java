@@ -71,14 +71,30 @@ public class Order {
     @Column(name = "address_zip", length = 20)
     private String addressZip;
 
-    /* ─── Payment ─── */
+        /* ─── Payment ─── */
     @Column(name = "payment_method", length = 20,
-            columnDefinition = "ENUM('card','cod','momo','mpesa')")
+            columnDefinition = "ENUM('cod','momo','mpesa')")
     private String paymentMethod;
 
     @Column(name = "payment_status", length = 20,
             columnDefinition = "ENUM('unpaid','paid','refunded')")
     private String paymentStatus;
+
+    /* For M-Pesa orders: which sub-flow did the customer pick?
+       - manual_paybill : customer pays via paybill + submits receipt code
+       - stk_push       : we trigger Daraja push to their phone
+       Null for other methods. */
+    @Column(name = "payment_flow", length = 20,
+            columnDefinition = "ENUM('manual_paybill','stk_push','cod')")
+    private String paymentFlow;
+
+    /* M-Pesa confirmation code the customer types in (Commit 2). */
+    @Column(name = "mpesa_receipt_code", length = 20)
+    private String mpesaReceiptCode;
+
+    /* Daraja's CheckoutRequestID — used to match callbacks idempotently (Commit 3). */
+    @Column(name = "mpesa_checkout_request_id", length = 60)
+    private String mpesaCheckoutRequestId;
 
     /* ─── Tracking ─── */
     @Column(name = "carrier_id", length = 30)

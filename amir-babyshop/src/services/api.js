@@ -506,6 +506,8 @@ function normalizeOrder(dto) {
     },
     payment: dto.paymentMethod,
     paymentStatus: dto.paymentStatus,
+    paymentFlow: dto.paymentFlow,
+    mpesaReceiptCode: dto.mpesaReceiptCode,
     carrier: dto.carrierId,
     carrierName: dto.carrierName,
     trackingNumber: dto.trackingNumber,
@@ -1142,7 +1144,19 @@ export const orderService = {
       auth: true,
     });
     return normalizeOrder(dto);
-  },    
+  },  
+  
+    /**
+   * Customer submits their M-Pesa receipt code for a manual-paybill order.
+   * Backend flags the order for staff verification.
+   */
+  submitMpesaCode: async (id, receiptCode) => {
+    return apiRequest(`/orders/${id}/submit-mpesa-code`, {
+      method: 'POST',
+      body: { code: receiptCode },
+      auth: true,
+    });
+  },
 
   remove: (id) =>
     MOCK_MODE.order
@@ -1157,6 +1171,32 @@ export const orderService = {
           body: checkpoint,
           auth: true,
         }),
+};
+
+/* ═══════════════════════════════════════════════════════════
+   💳 PAYMENT SERVICE — M-Pesa STK
+   ═══════════════════════════════════════════════════════════ */
+
+export const paymentService = {
+  /**
+   * Fire an STK push to the customer's phone.
+   * Returns: { ok, checkoutRequestId, customerMessage, error? }
+   */
+  stkPush: async (orderId, phone) => {
+    return apiRequest('/payments/mpesa/stk-push', {
+      method: 'POST',
+      body: { orderId, phone },
+      auth: true,
+    });
+  },
+
+  /**
+   * Poll payment status for an order.
+   * Returns: { orderId, paymentStatus, orderStatus, receipt }
+   */
+  getStatus: async (orderId) => {
+    return apiRequest(`/payments/mpesa/status/${orderId}`, { auth: true });
+  },
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -1255,6 +1295,7 @@ export default {
   coupon: couponService, 
   review: reviewService,
   registry: registryService,
+  payment: paymentService, 
   order: orderService,
   auth: authService,
   user: userService,

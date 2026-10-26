@@ -42,6 +42,9 @@ public class OrderMapper {
                 .addressZip(o.getAddressZip())
                 .paymentMethod(o.getPaymentMethod())
                 .paymentStatus(o.getPaymentStatus())
+                .paymentFlow(o.getPaymentFlow())
+                .mpesaReceiptCode(o.getMpesaReceiptCode())
+                .mpesaCheckoutRequestId(o.getMpesaCheckoutRequestId())
                 .carrierId(o.getCarrierId())
                 .carrierName(o.getCarrierName())
                 .trackingNumber(o.getTrackingNumber())
@@ -75,8 +78,8 @@ public class OrderMapper {
                 .eta(o.getEta())
                 .registryGiftId(o.getRegistryGiftId()) 
                 .checkpoints(parseCheckpoints(o.getCheckpoints()))
-                .paymentMethod(o.getPaymentMethod())     // 👈 ADD THIS
-                .paymentStatus(o.getPaymentStatus()) 
+                .paymentMethod(o.getPaymentMethod())
+                .paymentStatus(o.getPaymentStatus())
                 .createdAt(o.getCreatedAt())
                 .build();
     }

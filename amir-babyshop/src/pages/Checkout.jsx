@@ -1,6 +1,9 @@
-import { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
-import { CheckCircle2, ArrowLeft, CreditCard, Truck, AlertCircle } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import {
+  CheckCircle2, ArrowLeft, Truck, AlertCircle, Smartphone,
+  CreditCard, Lock,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -10,14 +13,17 @@ import CouponInput from '../components/UI/CouponInput';
 import { orderService } from '../services/api';
 
 export default function Checkout() {
+  const navigate = useNavigate();
   const { items, subtotal, clearCart } = useCart();
-  const { user } = useAuth();
+  const { user, isStaff } = useAuth();
   const { appliedCoupon, couponDiscount, removeCoupon } = useExtras();
 
   const [step, setStep] = useState('form');
   const [placedOrder, setPlacedOrder] = useState(null);
   const [error, setError] = useState('');
   const [touched, setTouched] = useState({});
+
+  /* ── Form state ── */
   const [form, setForm] = useState({
     name:    user?.name  || '',
     email:   user?.email || '',
@@ -25,51 +31,93 @@ export default function Checkout() {
     address: '',
     city:    '',
     zip:     '',
-    payment: 'card',
+
+    /* Customer payment method: cod | mpesa */
+    payment: 'mpesa',
+
+    /* Only for customer + mpesa: manual_paybill | stk_push */
+    mpesaFlow: 'stk_push',
+
+    /* STAFF-ONLY: paid | unpaid */
+    staffPaymentStatus: 'unpaid',
+
+    /* STAFF-ONLY: cash | mpesa | momo (shown when staff chose 'paid') */
+    staffPaymentMethod: 'cash',
+
+    /* STAFF-ONLY: shown when staffPaymentMethod = 'mpesa' */
+    staffMpesaReceipt: '',
   });
 
-  /* 🎯 No shipping, no tax — customer pays subtotal minus discount */
+  /* ─── Totals ─── */
   const subtotalRounded = Math.round(subtotal);
   const total = Math.max(0, subtotalRounded - couponDiscount);
-  const giftItem = items.find(i => i.giftId);           
+  const giftItem = items.find(i => i.giftId);
 
+  /* ─── COD availability: Mombasa-only for customers ─── */
+  const cityIsMombasa = form.city.trim().toLowerCase() === 'mombasa';
+  const codAvailable = isStaff || cityIsMombasa;
+
+  /* If city changes away from Mombasa while COD is selected, force mpesa */
+  useEffect(() => {
+    if (!isStaff && form.payment === 'cod' && !cityIsMombasa) {
+      setForm(f => ({ ...f, payment: 'mpesa' }));
+    }
+  }, [cityIsMombasa, isStaff, form.payment]);
+
+  /* ─── Validation ─── */
   const errors = useMemo(() => {
     const errs = {};
-    if (!form.name.trim())         errs.name = 'Full name is required';
+
+    if (!form.name.trim())                errs.name = 'Full name is required';
     else if (form.name.trim().length < 2) errs.name = 'Name is too short';
 
-    if (!form.email.trim())        errs.email = 'Email is required';
-    else if (!/^\S+@\S+\.\S+$/.test(form.email)) errs.email = 'Enter a valid email address';
+    if (!form.email.trim())               errs.email = 'Email is required';
+    else if (!/^\S+@\S+\.\S+$/.test(form.email)) errs.email = 'Enter a valid email';
 
-    if (!form.phone.trim())        errs.phone = 'Phone is required';
+    if (!form.phone.trim())               errs.phone = 'Phone is required';
     else if (!/^[+\d][\d\s\-()]{7,}$/.test(form.phone.replace(/\s/g, '')))
       errs.phone = 'Enter a valid phone number';
 
-    if (!form.address.trim())      errs.address = 'Street address is required';
+    if (!form.address.trim())             errs.address = 'Street address is required';
     else if (form.address.trim().length < 5) errs.address = 'Address is too short';
 
-    if (!form.city.trim())         errs.city = 'City is required';
-    if (!form.zip.trim())          errs.zip = 'ZIP / Postal code is required';
+    if (!form.city.trim())                errs.city = 'City is required';
+
+    if (!form.zip.trim())                 errs.zip = 'ZIP / Postal code is required';
     else if (!/^[A-Za-z0-9\s\-]{3,10}$/.test(form.zip.trim()))
       errs.zip = 'Enter a valid ZIP / Postal code';
 
+    /* COD outside Mombasa (customer only) */
+    if (!isStaff && form.payment === 'cod' && !cityIsMombasa) {
+      errs.payment = 'Cash on delivery is only available within Mombasa. Choose M-Pesa instead.';
+    }
+
+    /* Staff marked paid via M-Pesa → receipt required */
+    if (isStaff
+        && form.staffPaymentStatus === 'paid'
+        && form.staffPaymentMethod === 'mpesa'
+        && !form.staffMpesaReceipt.trim()) {
+      errs.staffMpesaReceipt = 'M-Pesa receipt code is required';
+    }
+
     return errs;
-  }, [form]);
+  }, [form, isStaff, cityIsMombasa]);
 
   const isValid = Object.keys(errors).length === 0;
 
-  const handleBlur = (field) => {
+  const handleBlur = (field) =>
     setTouched(prev => ({ ...prev, [field]: true }));
-  };
 
   const showError = (field) => touched[field] && errors[field];
 
+  /* ─── Submit ─── */
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setTouched({
       name: true, email: true, phone: true,
       address: true, city: true, zip: true,
+      payment: true, staffMpesaReceipt: true,
     });
 
     if (!isValid) {
@@ -84,14 +132,14 @@ export default function Checkout() {
     setStep('processing');
 
     try {
-      /* ─── Build the payload the backend expects ─── */
+      /* ── Build payload ── */
       const payload = {
         items: items.map(i => ({
           productId: i.id,
           qty: i.qty,
           size: i.size || null,
           color: i.color || null,
-          price: i.price,        // echo what customer saw — backend verifies
+          price: i.price,
         })),
         customerName:  form.name.trim(),
         customerEmail: form.email.trim().toLowerCase(),
@@ -99,18 +147,56 @@ export default function Checkout() {
         addressStreet: form.address.trim(),
         addressCity:   form.city.trim(),
         addressZip:    form.zip.trim(),
-        paymentMethod: form.payment,
         couponCode:    appliedCoupon?.code || null,
         giftId:        giftItem?.giftId || null,
         notes:         null,
       };
 
+      if (isStaff) {
+        /* ── STAFF ORDER ── */
+        if (form.staffPaymentStatus === 'paid') {
+          /* Paid at checkout */
+          payload.paymentMethod = form.staffPaymentMethod === 'momo'
+            ? 'momo'
+            : form.staffPaymentMethod === 'mpesa'
+            ? 'mpesa'
+            : 'cod';
+          payload.paymentFlow = null;
+          payload.paymentStatus = 'paid';
+          payload.mpesaReceiptCode =
+            form.staffPaymentMethod === 'mpesa'
+              ? form.staffMpesaReceipt.trim()
+              : null;
+        } else {
+          /* Unpaid — treat as COD (pay later) */
+          payload.paymentMethod = 'cod';
+          payload.paymentFlow = 'cod';
+          payload.paymentStatus = 'unpaid';
+        }
+      } else {
+        /* ── CUSTOMER ORDER ── */
+        payload.paymentMethod = form.payment;
+        if (form.payment === 'mpesa') {
+          payload.paymentFlow = form.mpesaFlow;
+        } else if (form.payment === 'cod') {
+          payload.paymentFlow = 'cod';
+        }
+      }
+
       const order = await orderService.create(payload);
 
-      /* ─── Clear cart & coupon after success ─── */
       clearCart();
       removeCoupon();
 
+      /* ── Route by scenario ── */
+
+      /* Customer + mpesa (either flow) → pay page */
+      if (!isStaff && form.payment === 'mpesa') {
+        navigate(`/pay/${order.id}`, { replace: true });
+        return;
+      }
+
+      /* Everything else → inline success */
       setPlacedOrder(order);
       setStep('done');
       toast.success('Order placed successfully!', { icon: '🎉' });
@@ -122,7 +208,9 @@ export default function Checkout() {
     }
   };
 
-  /* ── SUCCESS ── */
+  /* ═══════════════════════════════════════════════════════════
+     SUCCESS SCREEN
+     ═══════════════════════════════════════════════════════════ */
   if (step === 'done' && placedOrder) {
     return (
       <div className="max-w-xl mx-auto px-4 py-16 text-center">
@@ -139,7 +227,7 @@ export default function Checkout() {
         <div className="bg-amir-yellow/40 rounded-2xl p-3 mb-5 text-left">
           <p className="text-xs font-bold text-amir-dark/80 mb-1">📌 Save your Order ID</p>
           <p className="text-[11px] text-amir-dark/60 mb-2">
-            You'll need it to track your order. Screenshot this screen or write it down.
+            You'll need it to track your order.
           </p>
           <p className="font-mono font-black text-sm bg-white rounded-lg px-3 py-2 text-center">
             {placedOrder.id}
@@ -152,16 +240,16 @@ export default function Checkout() {
             Track this order
           </Link>
           {user && (
-            <Link to="/my-orders" className="btn-secondary">
-              View my orders
-            </Link>
+            <Link to="/my-orders" className="btn-secondary">View my orders</Link>
           )}
         </div>
       </div>
     );
   }
 
-  /* ── EMPTY CART ── */
+  /* ═══════════════════════════════════════════════════════════
+     EMPTY CART
+     ═══════════════════════════════════════════════════════════ */
   if (items.length === 0) {
     return (
       <div className="max-w-xl mx-auto px-4 py-20 text-center">
@@ -171,6 +259,9 @@ export default function Checkout() {
     );
   }
 
+  /* ═══════════════════════════════════════════════════════════
+     MAIN FORM
+     ═══════════════════════════════════════════════════════════ */
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-8">
       <Link
@@ -182,13 +273,12 @@ export default function Checkout() {
 
       <h1 className="text-2xl sm:text-3xl font-black mb-1">Checkout</h1>
       <p className="text-xs sm:text-sm text-amir-dark/60 font-semibold mb-6">
-        Complete your details below
+        {isStaff ? 'Record a new order for a customer' : 'Complete your details below'}
       </p>
 
       <div className="grid lg:grid-cols-3 gap-6">
         <form onSubmit={handleSubmit} className="lg:col-span-2 space-y-5" noValidate>
 
-          {/* Global error banner */}
           {error && (
             <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-50 border border-rose-200">
               <AlertCircle size={16} className="text-rose-500 shrink-0 mt-0.5" />
@@ -199,8 +289,11 @@ export default function Checkout() {
             </div>
           )}
 
+          {/* ─── Contact & shipping ─── */}
           <div className="card p-4 sm:p-5">
-            <h2 className="font-black mb-4">Contact & shipping</h2>
+            <h2 className="font-black mb-4">
+              {isStaff ? 'Customer details' : 'Contact & shipping'}
+            </h2>
 
             <div className="grid sm:grid-cols-2 gap-3">
               <div className="sm:col-span-2">
@@ -260,7 +353,7 @@ export default function Checkout() {
                 onChange={v => setForm({ ...form, city: v })}
                 onBlur={() => handleBlur('city')}
                 error={showError('city') ? errors.city : ''}
-                placeholder="Nairobi"
+                placeholder={isStaff ? 'Nairobi' : 'Mombasa'}
                 autoComplete="address-level2"
               />
 
@@ -271,37 +364,47 @@ export default function Checkout() {
                 onChange={v => setForm({ ...form, zip: v })}
                 onBlur={() => handleBlur('zip')}
                 error={showError('zip') ? errors.zip : ''}
-                placeholder="00100"
+                placeholder="80100"
                 autoComplete="postal-code"
               />
             </div>
+
+            {/* COD availability hint */}
+            {!isStaff && form.city.trim() && !cityIsMombasa && (
+              <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200">
+                <AlertCircle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-amber-800 font-semibold">
+                  Cash on delivery is only available in Mombasa. For other cities,
+                  please use M-Pesa.
+                </p>
+              </div>
+            )}
           </div>
 
-          <div className="card p-4 sm:p-5">
-            <h2 className="font-black mb-4">Payment method</h2>
-            <div className="grid sm:grid-cols-3 gap-2 sm:gap-3">
-              {[
-                { id: 'card', label: 'Card',             icon: <CreditCard size={18} /> },
-                { id: 'cod',  label: 'Cash on delivery', icon: <Truck size={18} /> },
-                { id: 'momo', label: 'Mobile money',     icon: '📱' },
-              ].map(p => (
-                <button
-                  type="button"
-                  key={p.id}
-                  onClick={() => setForm({ ...form, payment: p.id })}
-                  className={`p-3 sm:p-4 rounded-2xl border-2 font-bold flex flex-col items-center gap-2 transition-all ${
-                    form.payment === p.id
-                      ? 'border-amir-pink bg-amir-pink/20'
-                      : 'border-gray-200 hover:border-amir-pink/50'
-                  }`}
-                >
-                  <span className="text-amir-dark">{p.icon}</span>
-                  <span className="text-xs sm:text-sm text-center">{p.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* ─── STAFF PAYMENT PICKER ─── */}
+          {isStaff && (
+            <StaffPaymentSection
+              form={form}
+              setForm={setForm}
+              showError={showError}
+              errors={errors}
+              handleBlur={handleBlur}
+            />
+          )}
 
+          {/* ─── CUSTOMER PAYMENT PICKER ─── */}
+          {!isStaff && (
+            <CustomerPaymentSection
+              form={form}
+              setForm={setForm}
+              codAvailable={codAvailable}
+              showError={showError}
+              errors={errors}
+              handleBlur={handleBlur}
+            />
+          )}
+
+          {/* ─── Submit ─── */}
           <button
             type="submit"
             disabled={step === 'processing'}
@@ -328,6 +431,7 @@ export default function Checkout() {
           )}
         </form>
 
+        {/* ─── Order summary ─── */}
         <div className="lg:col-span-1">
           <div className="card p-4 sm:p-5 lg:sticky lg:top-20">
             <h2 className="font-black mb-4">Your order</h2>
@@ -353,7 +457,6 @@ export default function Checkout() {
               ))}
             </div>
 
-            {/* 🎟️ Coupon input */}
             <div className="border-t border-amir-dark/10 mt-4 pt-4">
               <CouponInput subtotal={subtotalRounded} />
             </div>
@@ -383,16 +486,243 @@ export default function Checkout() {
   );
 }
 
-/* ───────────── Reusable Field Component ───────────── */
+/* ═══════════════════════════════════════════════════════════
+   CUSTOMER PAYMENT SECTION
+   ═══════════════════════════════════════════════════════════ */
+function CustomerPaymentSection({ form, setForm, codAvailable, showError, errors }) {
+  return (
+    <div className="card p-4 sm:p-5">
+      <h2 className="font-black mb-4">Payment method</h2>
+
+      <div className="grid grid-cols-2 gap-2 sm:gap-3">
+        {/* M-Pesa */}
+        <button
+          type="button"
+          onClick={() => setForm({ ...form, payment: 'mpesa' })}
+          className={`p-3 sm:p-4 rounded-2xl border-2 font-bold flex flex-col items-center gap-2 transition-all ${
+            form.payment === 'mpesa'
+              ? 'border-amir-pink bg-amir-pink/20'
+              : 'border-gray-200 hover:border-amir-pink/50'
+          }`}
+        >
+          <Smartphone size={18} className="text-amir-dark" />
+          <span className="text-xs sm:text-sm text-center">M-Pesa</span>
+        </button>
+
+        {/* COD */}
+        <button
+          type="button"
+          disabled={!codAvailable}
+          onClick={() => codAvailable && setForm({ ...form, payment: 'cod' })}
+          className={`p-3 sm:p-4 rounded-2xl border-2 font-bold flex flex-col items-center gap-2 transition-all ${
+            !codAvailable
+              ? 'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed'
+              : form.payment === 'cod'
+              ? 'border-amir-pink bg-amir-pink/20'
+              : 'border-gray-200 hover:border-amir-pink/50'
+          }`}
+        >
+          <Truck size={18} className={codAvailable ? 'text-amir-dark' : 'text-gray-300'} />
+          <span className="text-xs sm:text-sm text-center">
+            Cash on delivery
+            {!codAvailable && (
+              <span className="block text-[9px] text-gray-400 font-bold mt-0.5">
+                Mombasa only
+              </span>
+            )}
+          </span>
+        </button>
+      </div>
+
+      {/* M-Pesa sub-flow */}
+      {form.payment === 'mpesa' && (
+        <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/60 mb-2">
+            How would you like to pay?
+          </p>
+
+          <label
+            className={`flex items-start gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+              form.mpesaFlow === 'stk_push'
+                ? 'border-emerald-300 bg-emerald-50'
+                : 'border-gray-200 hover:border-emerald-200'
+            }`}
+          >
+            <input
+              type="radio"
+              name="mpesaFlow"
+              value="stk_push"
+              checked={form.mpesaFlow === 'stk_push'}
+              onChange={e => setForm({ ...form, mpesaFlow: e.target.value })}
+              className="mt-0.5 accent-emerald-500 shrink-0"
+            />
+            <div className="min-w-0">
+              <p className="text-xs font-black text-amir-dark">📱 Send prompt to my phone</p>
+              <p className="text-[10px] text-amir-dark/60 font-semibold mt-0.5">
+                We'll push an M-Pesa prompt — enter your PIN to pay
+              </p>
+            </div>
+          </label>
+
+          <label
+            className={`flex items-start gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+              form.mpesaFlow === 'manual_paybill'
+                ? 'border-blue-300 bg-blue-50'
+                : 'border-gray-200 hover:border-blue-200'
+            }`}
+          >
+            <input
+              type="radio"
+              name="mpesaFlow"
+              value="manual_paybill"
+              checked={form.mpesaFlow === 'manual_paybill'}
+              onChange={e => setForm({ ...form, mpesaFlow: e.target.value })}
+              className="mt-0.5 accent-blue-500 shrink-0"
+            />
+            <div className="min-w-0">
+              <p className="text-xs font-black text-amir-dark">💳 Pay via paybill</p>
+              <p className="text-[10px] text-amir-dark/60 font-semibold mt-0.5">
+                We'll show the paybill number and account — you pay manually
+              </p>
+            </div>
+          </label>
+        </div>
+      )}
+
+      {showError('payment') && errors.payment && (
+        <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg bg-rose-50 border border-rose-200">
+          <AlertCircle size={14} className="text-rose-500 shrink-0 mt-0.5" />
+          <p className="text-[11px] text-rose-700 font-semibold">{errors.payment}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   STAFF PAYMENT SECTION
+   ═══════════════════════════════════════════════════════════ */
+function StaffPaymentSection({ form, setForm, showError, errors }) {
+  return (
+    <div className="card p-4 sm:p-5">
+      <h2 className="font-black mb-4">Payment</h2>
+
+      {/* Status picker */}
+      <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/60 mb-2">
+        Payment status
+      </p>
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-4">
+        <button
+          type="button"
+          onClick={() => setForm({ ...form, staffPaymentStatus: 'unpaid' })}
+          className={`p-3 rounded-2xl border-2 font-bold flex flex-col items-center gap-1.5 transition-all ${
+            form.staffPaymentStatus === 'unpaid'
+              ? 'border-amber-400 bg-amber-50'
+              : 'border-gray-200 hover:border-amber-200'
+          }`}
+        >
+          <span className="text-lg">⏳</span>
+          <span className="text-xs sm:text-sm">Unpaid</span>
+          <span className="text-[9px] text-amir-dark/50 font-semibold text-center leading-tight">
+            Pay on delivery
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setForm({ ...form, staffPaymentStatus: 'paid' })}
+          className={`p-3 rounded-2xl border-2 font-bold flex flex-col items-center gap-1.5 transition-all ${
+            form.staffPaymentStatus === 'paid'
+              ? 'border-emerald-400 bg-emerald-50'
+              : 'border-gray-200 hover:border-emerald-200'
+          }`}
+        >
+          <span className="text-lg">✅</span>
+          <span className="text-xs sm:text-sm">Paid</span>
+          <span className="text-[9px] text-amir-dark/50 font-semibold text-center leading-tight">
+            Customer already paid
+          </span>
+        </button>
+      </div>
+
+      {/* If PAID → ask how they paid */}
+      {form.staffPaymentStatus === 'paid' && (
+        <div className="pt-4 border-t border-gray-100 space-y-3">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/60">
+            How did they pay?
+          </p>
+
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: 'cash', label: 'Cash',    icon: '💵' },
+              { id: 'mpesa', label: 'M-Pesa', icon: '📱' },
+              { id: 'momo', label: 'Mobile',  icon: '📲' },
+            ].map(m => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setForm({ ...form, staffPaymentMethod: m.id })}
+                className={`p-2 rounded-xl border-2 font-bold flex flex-col items-center gap-1 transition-all ${
+                  form.staffPaymentMethod === m.id
+                    ? 'border-emerald-400 bg-emerald-50'
+                    : 'border-gray-200 hover:border-emerald-200'
+                }`}
+              >
+                <span className="text-base">{m.icon}</span>
+                <span className="text-[11px]">{m.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* If M-Pesa → receipt code */}
+          {form.staffPaymentMethod === 'mpesa' && (
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-amir-dark/60 mb-1">
+                M-Pesa receipt code *
+              </label>
+              <div className="relative">
+                <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  name="staffMpesaReceipt"
+                  type="text"
+                  value={form.staffMpesaReceipt}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      staffMpesaReceipt: e.target.value.toUpperCase(),
+                    })
+                  }
+                  onBlur={() => showError('staffMpesaReceipt')}
+                  placeholder="e.g. SGH1ABCDEFG"
+                  className={`w-full pl-9 pr-3 py-2.5 rounded-xl border-2 outline-none text-sm font-bold font-mono transition-colors ${
+                    showError('staffMpesaReceipt')
+                      ? 'border-rose-400 bg-rose-50/50'
+                      : 'border-gray-200 focus:border-amir-pink bg-white'
+                  }`}
+                />
+              </div>
+              {showError('staffMpesaReceipt') && (
+                <p className="mt-1 text-[11px] text-rose-500 font-semibold">
+                  {errors.staffMpesaReceipt}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   REUSABLE FIELD
+   ═══════════════════════════════════════════════════════════ */
 function Field({
   label, name, type = 'text', value, onChange, onBlur, error, placeholder, autoComplete,
 }) {
   return (
     <div>
-      <label
-        htmlFor={name}
-        className="block text-xs font-bold text-amir-dark/70 mb-1.5"
-      >
+      <label htmlFor={name} className="block text-xs font-bold text-amir-dark/70 mb-1.5">
         {label}
       </label>
       <div className="relative">

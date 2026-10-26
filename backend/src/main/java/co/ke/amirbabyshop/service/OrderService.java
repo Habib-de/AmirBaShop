@@ -81,6 +81,79 @@ public class OrderService {
                     .build();
         }).toList();
 
+                 /* ─── Payment method rules ─── */
+        String paymentMethod = req.getPaymentMethod() != null
+                ? req.getPaymentMethod().trim().toLowerCase()
+                : "mpesa";
+        String paymentFlow = null;
+
+        boolean isStaff = "owner".equalsIgnoreCase(userRole)
+                || "sales".equalsIgnoreCase(userRole);
+
+        if ("cod".equals(paymentMethod)) {
+            /* COD is Mombasa-only — but staff are not restricted
+               (walk-in / phone orders for out-of-town delivery paid in cash) */
+            if (!isStaff) {
+                String city = req.getAddressCity() != null ? req.getAddressCity().trim() : "";
+                if (!city.equalsIgnoreCase("mombasa")) {
+                    throw new ApiException(
+                            "Cash on delivery is only available within Mombasa. " +
+                            "Please choose M-Pesa for delivery outside Mombasa.",
+                            HttpStatus.UNPROCESSABLE_ENTITY);
+                }
+            }
+            paymentFlow = "cod";
+        } else if ("mpesa".equals(paymentMethod)) {
+            String flow = req.getPaymentFlow() != null
+                    ? req.getPaymentFlow().trim().toLowerCase()
+                    : "manual_paybill";
+            if (!"manual_paybill".equals(flow) && !"stk_push".equals(flow)) {
+                throw new ApiException(
+                        "Invalid M-Pesa payment flow. Choose 'manual_paybill' or 'stk_push'.",
+                        HttpStatus.UNPROCESSABLE_ENTITY);
+            }
+            paymentFlow = flow;
+        } else if ("momo".equals(paymentMethod)) {
+            /* Non-M-Pesa mobile money (Airtel, Telkom, etc.) — staff only for now */
+            if (!isStaff) {
+                throw new ApiException(
+                        "Mobile money (non M-Pesa) is only available through our staff. " +
+                        "Please choose M-Pesa.",
+                        HttpStatus.UNPROCESSABLE_ENTITY);
+            }
+            paymentFlow = null;
+        } else {
+            throw new ApiException(
+                    "Unsupported payment method: " + paymentMethod,
+                    HttpStatus.UNPROCESSABLE_ENTITY);
+        }
+
+        /* ─── Payment status: staff can mark paid at creation, customers cannot ─── */
+        String finalPaymentStatus = "unpaid";
+        String finalReceiptCode = null;
+
+        if (isStaff) {
+            String requested = req.getPaymentStatus() != null
+                    ? req.getPaymentStatus().trim().toLowerCase()
+                    : "unpaid";
+            if (!"paid".equals(requested) && !"unpaid".equals(requested)) {
+                throw new ApiException(
+                        "Invalid payment status. Use 'paid' or 'unpaid'.",
+                        HttpStatus.UNPROCESSABLE_ENTITY);
+            }
+            finalPaymentStatus = requested;
+
+            if ("paid".equals(requested) && "mpesa".equals(paymentMethod)) {
+                String code = req.getMpesaReceiptCode();
+                if (code == null || code.trim().isEmpty()) {
+                    throw new ApiException(
+                            "M-Pesa receipt code is required when marking as paid via M-Pesa.",
+                            HttpStatus.UNPROCESSABLE_ENTITY);
+                }
+                finalReceiptCode = code.trim().toUpperCase();
+            }
+        }
+
         /* ─── Compute subtotal ─── */
         BigDecimal subtotal = items.stream()
                 .map(it -> it.getPrice().multiply(BigDecimal.valueOf(it.getQty())))
@@ -152,8 +225,10 @@ public class OrderService {
                 .addressStreet(req.getAddressStreet().trim())
                 .addressCity(req.getAddressCity().trim())
                 .addressZip(req.getAddressZip() != null ? req.getAddressZip().trim() : null)
-                .paymentMethod(req.getPaymentMethod() != null ? req.getPaymentMethod() : "card")
-                .paymentStatus("unpaid")
+                .paymentMethod(paymentMethod)
+                .paymentStatus(finalPaymentStatus)
+                .paymentFlow(paymentFlow)
+                .mpesaReceiptCode(finalReceiptCode)
                 .placedById(userId)
                 .placedByName(userName != null ? userName : "Guest")
                 .placedByRole(userRole != null ? userRole : "guest")
@@ -373,6 +448,71 @@ notificationService.createForUser(
     "Order " + order.getId() + " — payment status: " + status + ".",
     "/my-orders"
 );
+        return orderMapper.toDto(order, orderItemRepository.findByOrderId(order.getId()));
+    }
+
+        /* ═══════════════ SUBMIT MPESA RECEIPT CODE (customer) ═══════════════ */
+    /* Used by the paybill flow: customer pays via M-Pesa, then enters the receipt code.
+       Sets mpesa_receipt_code and flags the order for staff verification.
+       Staff later confirms via updatePaymentStatus("paid"). */
+    @Transactional
+    public OrderDto submitMpesaCode(String tenantId, Long callerUserId, String callerEmail,
+                                     String callerRole, String orderId, String code) {
+        Order order = orderRepository.findByIdAndTenantId(orderId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        /* Owner of the order OR staff can submit the code */
+        boolean isStaff = "owner".equals(callerRole) || "sales".equals(callerRole);
+        boolean isOwner = callerEmail != null
+                && callerEmail.equalsIgnoreCase(order.getCustomerEmail());
+        if (!isStaff && !isOwner) {
+            throw new ForbiddenException("You can only submit a code for your own order");
+        }
+
+        /* Guard rails */
+        if ("paid".equals(order.getPaymentStatus())) {
+            throw new ApiException("This order is already paid", HttpStatus.CONFLICT);
+        }
+        if ("cancelled".equals(order.getStatus())) {
+            throw new ApiException("This order is cancelled", HttpStatus.CONFLICT);
+        }
+        if (!"mpesa".equals(order.getPaymentMethod())) {
+            throw new ApiException(
+                    "This order is not an M-Pesa order", HttpStatus.CONFLICT);
+        }
+        if (!"manual_paybill".equals(order.getPaymentFlow())) {
+            throw new ApiException(
+                    "This order is set for STK push — use the STK flow instead",
+                    HttpStatus.CONFLICT);
+        }
+        if (code == null || code.trim().isEmpty()) {
+            throw new ApiException("Receipt code is required", HttpStatus.UNPROCESSABLE_ENTITY);
+        }
+
+        String cleanCode = code.trim().toUpperCase();
+        if (cleanCode.length() < 8 || cleanCode.length() > 20) {
+            throw new ApiException(
+                    "M-Pesa receipt code must be 8–20 characters", HttpStatus.UNPROCESSABLE_ENTITY);
+        }
+
+        order.setMpesaReceiptCode(cleanCode);
+        orderRepository.save(order);
+
+        /* Notify all staff (owner + sales) that a receipt was submitted */
+        try {
+            notificationService.createForEmail(
+                    order.getCustomerEmail() != null ? order.getCustomerEmail() : "",
+                    "order",
+                    "Receipt submitted — verify payment",
+                    "Order " + order.getId() + " — receipt " + cleanCode
+                            + ". Verify and mark as paid.",
+                    "/orders"
+            );
+        } catch (Exception e) {
+            /* Non-fatal */
+            System.err.println("[OrderService] Receipt notify failed: " + e.getMessage());
+        }
+
         return orderMapper.toDto(order, orderItemRepository.findByOrderId(order.getId()));
     }
 

@@ -1,6 +1,6 @@
 import { useMemo, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Package, RefreshCw, ChevronDown, MapPin, RotateCcw, CheckCircle2, Printer, Truck } from 'lucide-react';
+import { Package, RefreshCw, ChevronDown, MapPin, RotateCcw, CheckCircle2, Printer, Truck, CreditCard } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useOrders } from '../context/OrderContext';
 import { useAuth } from '../context/AuthContext';
@@ -11,6 +11,7 @@ import TrackingTimeline from '../components/Orders/TrackingTimeline';
 import ReturnModal from '../components/Orders/ReturnModal';
 import InvoiceModal from '../components/Orders/InvoiceModal';
 import { formatETA, daysUntilETA } from '../utils/carrierHelpers';
+import PaymentModal from '../components/UI/PaymentModal';
 
 const STATUS_META = {
   pending:   { label: 'Pending',   cls: 'bg-amber-100 text-amber-800' },
@@ -28,6 +29,7 @@ export default function MyOrders() {
   const [refreshing, setRefreshing] = useState(false);
   const [requesting, setRequesting] = useState(null);
   const [invoicing, setInvoicing] = useState(null);
+  const [payingOrder, setPayingOrder] = useState(null);
 
   const myOrders = useMemo(() => {
     if (!user) return [];
@@ -185,6 +187,34 @@ const etaHint =
                   ) : (
                     <OrderTimeline status={o.status} compact />
                   )} */}
+
+                   {o.paymentStatus === 'unpaid'
+                    && o.payment !== 'cod'
+                    && o.payment
+                    && o.status !== 'cancelled' && (
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPayingOrder(o);
+                      }}
+                      className="mt-2 flex items-center justify-between gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 hover:bg-amber-100 active:scale-[0.99] transition-all cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-8 h-8 rounded-full bg-white text-amber-600 flex items-center justify-center shrink-0">
+                          <CreditCard size={14} />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-black text-amber-900">Complete payment</p>
+                          <p className="text-[10px] text-amber-700 font-semibold">
+                            {formatCurrency(o.total)} — pay now to confirm order
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 shrink-0">
+                        Pay →
+                      </span>
+                    </div>
+                  )}
 
                   {o.trackingNumber && (
                     <div className="mt-3 pt-3 border-t border-amir-dark/5">
@@ -386,6 +416,20 @@ const etaHint =
           order={invoicing}
           title="Receipt"
           onClose={() => setInvoicing(null)}
+        />
+      )}
+
+            {payingOrder && (
+        <PaymentModal
+          order={payingOrder}
+          shopInfo={{ paybill: '247247' }}
+          onSuccess={() => {
+            setPayingOrder(null);
+            toast.success('Payment submitted', { icon: '✅' });
+            // Refresh orders list after success
+            window.location.reload();
+          }}
+          onCancel={() => setPayingOrder(null)}
         />
       )}
     </div>

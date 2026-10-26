@@ -167,6 +167,28 @@ public class OrderController {
                 orderService.updatePaymentStatus(principal.getTenantId(), principal.getRole(), id, body.get("status")));
     }
 
+        /* ═══════════════ SUBMIT MPESA RECEIPT (customer or staff) ═══════════════ */
+    /* Used by the paybill flow: customer pays externally, then enters the M-Pesa
+       receipt code in the checkout modal. Order stays unpaid until staff verifies. */
+
+    @PostMapping("/{id}/submit-mpesa-code")
+    public ApiResponse<OrderDto> submitMpesaCode(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable String id,
+            @RequestBody Map<String, String> body
+    ) {
+        if (principal == null) throw new UnauthorizedException("Not authenticated");
+        return ApiResponse.ok("Receipt submitted",
+                orderService.submitMpesaCode(
+                        principal.getTenantId(),
+                        principal.getId(),
+                        principal.getUsername(),
+                        principal.getRole(),
+                        id,
+                        body.get("code")
+                ));
+    }
+
     /* ═══════════════ DELETE (staff only) ═══════════════ */
 
     @DeleteMapping("/{id}")

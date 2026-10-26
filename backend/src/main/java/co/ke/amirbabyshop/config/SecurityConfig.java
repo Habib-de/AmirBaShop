@@ -53,6 +53,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/orders").permitAll()
                         .requestMatchers(HttpMethod.GET,  "/orders/track").permitAll() 
                         .requestMatchers(HttpMethod.GET, "/push/public-key").permitAll()
+                        .requestMatchers("/payments/mpesa/**").permitAll()
                         .requestMatchers("/docs/**", "/swagger/**", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         // ─── Everything else authenticated ───
                         .anyRequest().authenticated()
