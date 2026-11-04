@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useOrders, ORDER_STATUS } from '../context/OrderContext';
-import { useInventory } from '../context/InventoryContext';
+// import { useInventory } from '../context/InventoryContext';
 import { orderService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useExtras } from '../context/ExtrasContext';
@@ -32,7 +32,7 @@ const STATUS_META = {
 
 export default function Orders() {
   const { orders, confirmOrder, fulfillOrder, cancelOrder, deleteOrder, updateOrder, addCheckpoint, counts, reload } = useOrders();
-  const { updateStock, products } = useInventory();
+    // useInventory no longer needed — stock deduction moved to backend
   const { isOwner, isSales } = useAuth();
   const { notify } = useExtras();
   const canEdit = isOwner || isSales;
@@ -68,16 +68,12 @@ export default function Orders() {
     setConfirmingOrder(order);
   };
 
-  const handleConfirmApply = ({ carrierId, carrierName, trackingNumber, eta }) => {
+    const handleConfirmApply = ({ carrierId, carrierName, trackingNumber, eta }) => {
     const order = confirmingOrder;
     if (!order) return;
 
-    order.items.forEach(item => {
-      const product = products.find(p => p.id === item.id);
-      if (product) {
-        updateStock(product.id, Math.max(0, product.stock - item.qty));
-      }
-    });
+    /* Stock was already deducted by the backend at order creation.
+       Do NOT deduct here — it would double-deduct. */
 
     confirmOrder(order.id, {
       carrierId,
@@ -681,13 +677,12 @@ function ConfirmCarrierModal({ order, onClose, onConfirm }) {
             />
           </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
             <p className="text-[11px] text-blue-800 font-semibold leading-relaxed">
               ℹ️ This will:
             </p>
             <ul className="text-[10px] text-blue-700 space-y-0.5 mt-1 ml-3 list-disc">
               <li>Mark the order as confirmed</li>
-              <li>Deduct stock for all items</li>
               <li>Attach carrier + tracking info</li>
               <li>Notify the customer</li>
             </ul>

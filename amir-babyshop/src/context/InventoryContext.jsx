@@ -8,27 +8,32 @@ const InventoryContext = createContext();
 export const useInventory = () => useContext(InventoryContext);
 
 /* ═══════════════════════════════════════════════════════════
-   VARIANT HELPERS
+   VARIANT HELPERS — now operate on an ARRAY of variant objects
    ═══════════════════════════════════════════════════════════ */
 
-export const variantKey = (size, color) =>
-  `${size || '_'}-${color || '_'}`;
+/** Legacy helper, kept for backward compat (no longer used internally). */
+export const variantKey = (size, color) => `${size || '_'}-${color || '_'}`;
 
-/**
- * Reverse of variantKey. Sizes can contain hyphens (e.g. "0-3M"), so a plain
- * key.split('-') is wrong. We match against the product's known sizes first
- * (longest first), then fall back to splitting on the first hyphen.
- */
+/** Find a variant by size + color in the array. Returns the variant object or null. */
+export const findVariant = (product, size, color) => {
+  if (!product || !Array.isArray(product.variants)) return null;
+  const s = size || null;
+  const c = color || null;
+  return product.variants.find(v =>
+    (v.size || null) === s &&
+    (v.color || null) === c
+  ) || null;
+};
+
+/** Legacy parser (still used by some UI pages). */
 export const parseVariantKey = (product, key) => {
   const sizes = [...(product?.sizes || [])].sort((a, b) => b.length - a.length);
-
   for (const s of sizes) {
     if (key.startsWith(`${s}-`)) {
       const color = key.slice(s.length + 1);
       return { size: s, color: color === '_' ? null : color };
     }
   }
-
   const i = key.indexOf('-');
   if (i === -1) return { size: key === '_' ? null : key, color: null };
   const size = key.slice(0, i);
@@ -41,16 +46,16 @@ export const parseVariantKey = (product, key) => {
 
 /** Image saved on one exact size+colour variant ('' if none). */
 export const getVariantImage = (product, size, color) => {
-  if (!product) return '';
-  return product.variants?.[variantKey(size, color)]?.image || '';
+  const v = findVariant(product, size, color);
+  return v?.imageUrl || '';
 };
 
 /** First image saved for a colour (any size); falls back to the product image. */
 export const getColorImage = (product, color) => {
   if (!product) return '';
-  if (product.variants && color) {
-    for (const [key, v] of Object.entries(product.variants)) {
-      if (v?.image && parseVariantKey(product, key).color === color) return v.image;
+  if (Array.isArray(product.variants) && color) {
+    for (const v of product.variants) {
+      if (v.imageUrl && (v.color || null) === (color || null)) return v.imageUrl;
     }
   }
   return product.image || '';
@@ -58,16 +63,19 @@ export const getColorImage = (product, color) => {
 
 export const getVariantStock = (product, size, color) => {
   if (!product) return 0;
-  if (!product.variants) return product.stock ?? 0;
-  const key = variantKey(size, color);
-  return product.variants[key]?.stock ?? 0;
+  if (!Array.isArray(product.variants) || product.variants.length === 0) {
+    return product.stock ?? 0;
+  }
+  const v = findVariant(product, size, color);
+  return v?.stock ?? 0;
 };
 
 export const getTotalStock = (product) => {
   if (!product) return 0;
-  if (!product.variants) return product.stock ?? 0;
-  return Object.values(product.variants)
-    .reduce((sum, v) => sum + (v.stock || 0), 0);
+  if (!Array.isArray(product.variants) || product.variants.length === 0) {
+    return product.stock ?? 0;
+  }
+  return product.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
 };
 
 export const isVariantInStock = (product, size, color) =>
@@ -77,19 +85,16 @@ export const isProductOutOfStock = (product) =>
   getTotalStock(product) === 0;
 
 /* ═══════════════════════════════════════════════════════════
-   PROVIDER — API IS THE SOURCE OF TRUTH
+   PROVIDER
    ═══════════════════════════════════════════════════════════ */
 export function InventoryProvider({ children }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Refetch whenever the logged-in user changes (login / logout / token swap).
-  // NOTE: InventoryProvider must be rendered inside <AuthProvider>.
   const auth = useAuth();
   const userId = auth?.user?.id ?? null;
 
-  /* ─── Single load function used by mount, login change, and retry ─── */
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -111,9 +116,10 @@ export function InventoryProvider({ children }) {
   }, [reload, userId]);
 
   /* ═══════════════════════════════════════════════════════════
-     MUTATIONS — optimistic UI + rollback on failure
+     MUTATIONS — optimistic where safe, reload where reliability matters
      ═══════════════════════════════════════════════════════════ */
 
+  /* Update total stock for a single-variant product (no sizes/colors). */
   const updateStock = async (id, stock) => {
     const prev = products;
     const safe = Math.max(0, stock);
@@ -121,7 +127,8 @@ export function InventoryProvider({ children }) {
       p.id === id ? { ...p, stock: safe } : p
     ));
     try {
-      await inventoryService.update(id, { stock: safe });
+      await inventoryService.updateStock(id, safe);
+      await reload();
     } catch (err) {
       console.error('[Inventory] updateStock failed:', err);
       setProducts(prev);
@@ -129,81 +136,48 @@ export function InventoryProvider({ children }) {
     }
   };
 
+  /* Set a specific variant's stock to a number. Backend returns full product. */
   const updateVariantStock = async (productId, size, color, newStock) => {
-    const prev = products;
-    const safeStock = Math.max(0, Number(newStock) || 0);
-
-    setProducts(list => list.map(p => {
-      if (p.id !== productId) return p;
-      const key = variantKey(size, color);
-      const updatedVariants = {
-        ...(p.variants || {}),
-        [key]: { ...(p.variants?.[key] || {}), stock: safeStock },
-      };
-      const totalStock = Object.values(updatedVariants)
-        .reduce((sum, v) => sum + (v.stock || 0), 0);
-      return { ...p, variants: updatedVariants, stock: totalStock };
-    }));
-
     try {
-      await inventoryService.setVariantStock(productId, size, color, safeStock);
+      const updatedDto = await inventoryService.setVariantStock(productId, size, color, newStock);
+      if (updatedDto) {
+        /* Backend returns updated ProductDto — normalise via the same list mapper */
+        const normalized = (await inventoryService.getById(productId));
+        if (normalized) {
+          setProducts(list => list.map(p => p.id === productId ? normalized : p));
+        }
+      }
+      /* Also reload to be safe */
+      await reload();
     } catch (err) {
       console.error('[Inventory] setVariantStock failed:', err);
-      setProducts(prev);
       throw err;
     }
   };
 
   const deductVariantStock = async (productId, size, color, qty) => {
-    const prev = products;
-    setProducts(list => list.map(p => {
-      if (p.id !== productId) return p;
-      const key = variantKey(size, color);
-      const current = p.variants?.[key]?.stock ?? p.stock ?? 0;
-      const newStock = Math.max(0, current - qty);
-      const updatedVariants = {
-        ...(p.variants || {}),
-        [key]: { ...(p.variants?.[key] || {}), stock: newStock },
-      };
-      const totalStock = Object.values(updatedVariants)
-        .reduce((sum, v) => sum + (v.stock || 0), 0);
-      return { ...p, variants: updatedVariants, stock: totalStock };
-    }));
     try {
       await inventoryService.deductVariantStock(productId, size, color, qty);
+      await reload();
     } catch (err) {
       console.error('[Inventory] deductVariantStock failed:', err);
-      setProducts(prev);
       throw err;
     }
   };
 
   const restoreVariantStock = async (productId, size, color, qty) => {
-    const prev = products;
-    setProducts(list => list.map(p => {
-      if (p.id !== productId) return p;
-      const key = variantKey(size, color);
-      const current = p.variants?.[key]?.stock ?? p.stock ?? 0;
-      const newStock = current + qty;
-      const updatedVariants = {
-        ...(p.variants || {}),
-        [key]: { ...(p.variants?.[key] || {}), stock: newStock },
-      };
-      const totalStock = Object.values(updatedVariants)
-        .reduce((sum, v) => sum + (v.stock || 0), 0);
-      return { ...p, variants: updatedVariants, stock: totalStock };
-    }));
     try {
       await inventoryService.restoreVariantStock(productId, size, color, qty);
+      await reload();
     } catch (err) {
       console.error('[Inventory] restoreVariantStock failed:', err);
-      setProducts(prev);
       throw err;
     }
   };
 
+  /* Add product — sends new variant shape to backend, then reloads. */
   const addProduct = async (product) => {
-    const created = await inventoryService.create({
+    const body = {
       name: product.name,
       categoryId: product.categoryId,
       sku: product.sku,
@@ -214,24 +188,30 @@ export function InventoryProvider({ children }) {
       badge: product.badge,
       sizes: product.sizes,
       colors: product.colors,
-      variants: product.variants,
+      /* variants now an ARRAY of { size, color, stock, imageUrl } */
+      variants: Array.isArray(product.variants) && product.variants.length > 0
+        ? product.variants.map(v => ({
+            size: v.size || null,
+            color: v.color || null,
+            stock: Number(v.stock) || 0,
+            imageUrl: v.imageUrl || null,
+          }))
+        : null,
       totalStock: product.stock ?? 0,
-    });
-    // Reload from backend so the list reflects what the server actually has
+    };
+    const created = await inventoryService.create(body);
     await reload();
     return created;
   };
 
-  /**
-   * Edit a product. `patch` uses the FRONTEND shape (image, stock, ...);
-   * it is mapped to the backend DTO shape (imageUrl, totalStock, ...),
-   * then the list is reloaded so the UI shows exactly what the server saved.
-   */
   const updateProduct = async (id, patch) => {
-    const { image, stock, category, ...rest } = patch;
+    const { image, stock, category, variants, ...rest } = patch;
     const body = { ...rest };
     if (image !== undefined) body.imageUrl = image;
     if (stock !== undefined) body.totalStock = stock;
+    if (variants !== undefined && Array.isArray(variants)) {
+      body.variants = variants;
+    }
     try {
       await inventoryService.update(id, body);
     } catch (err) {
@@ -253,7 +233,8 @@ export function InventoryProvider({ children }) {
     }
   };
 
-  /* ═══ Stats ═══ */
+  /* ═══ Derived stats ═══ */
+
   const lowStock = useMemo(() => products.filter(p => {
     const total = getTotalStock(p);
     return total > 0 && total <= 10;
@@ -264,11 +245,11 @@ export function InventoryProvider({ children }) {
     [products]
   );
 
-    /* Variants with 0 stock — one entry per (product, size, color) */
+  /* Sold-out variants — one entry per product×size×color with 0 stock. */
   const soldOutVariants = useMemo(() => {
     const list = [];
     for (const p of products) {
-      if (!p.variants || Object.keys(p.variants).length === 0) {
+      if (!Array.isArray(p.variants) || p.variants.length === 0) {
         if ((p.stock ?? 0) === 0) {
           list.push({
             productId: p.id,
@@ -280,15 +261,14 @@ export function InventoryProvider({ children }) {
         }
         continue;
       }
-      for (const [key, v] of Object.entries(p.variants)) {
+      for (const v of p.variants) {
         if ((v?.stock ?? 0) === 0) {
-          const { size, color } = parseVariantKey(p, key);
           list.push({
             productId: p.id,
             name: p.name,
             image: p.image,
-            size,
-            color,
+            size: v.size || null,
+            color: v.color || null,
           });
         }
       }
@@ -296,13 +276,12 @@ export function InventoryProvider({ children }) {
     return list;
   }, [products]);
 
-  /* Products that have at least one sold-out variant */
   const productsWithSoldOutVariants = useMemo(() => {
     return products.filter(p => {
-      if (!p.variants || Object.keys(p.variants).length === 0) {
+      if (!Array.isArray(p.variants) || p.variants.length === 0) {
         return (p.stock ?? 0) === 0;
       }
-      return Object.values(p.variants).some(v => (v?.stock ?? 0) === 0);
+      return p.variants.some(v => (v?.stock ?? 0) === 0);
     });
   }, [products]);
 
@@ -329,6 +308,12 @@ export function InventoryProvider({ children }) {
       soldOutVariants,
       productsWithSoldOutVariants,
       totalValue,
+      /* Extra helpers exposed for consumers */
+      findVariant,
+      getVariantStock,
+      getVariantImage,
+      getColorImage,
+      getTotalStock,
     }}>
       {children}
     </InventoryContext.Provider>

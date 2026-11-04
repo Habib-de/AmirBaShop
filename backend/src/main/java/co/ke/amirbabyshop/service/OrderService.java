@@ -11,6 +11,7 @@ import co.ke.amirbabyshop.mapper.OrderMapper;
 import co.ke.amirbabyshop.repository.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderService {
@@ -33,11 +35,13 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final ProductRepository productRepository;
+    private final ProductVariantRepository productVariantRepository;
     private final CouponRepository couponRepository;
     private final RegistryRepository registryRepository;
     private final OrderMapper orderMapper;
     private final ObjectMapper objectMapper;
     private final NotificationService notificationService;
+    private final StockMovementService stockMovementService;
 
     /* ═══════════════ CREATE ═══════════════ */
 
@@ -244,12 +248,46 @@ public class OrderService {
         }
         orderItemRepository.saveAll(items);
 
+                /* ─── Deduct stock for each item (reserve inventory) ─── */
+        for (OrderItem item : items) {
+            deductItemStock(tenantId, item, userId, userName, userRole, order.getId());
+        }
+
         /* ─── If this order fulfills a registry gift, link them ─── */
         if (req.getGiftId() != null && !req.getGiftId().isBlank()) {
             linkGiftToOrder(req.getGiftId().trim(), order.getId());
         }
 
         return orderMapper.toDto(order, items);
+    }
+
+     /* ═══════════════ GUEST ORDER CLAIM ═══════════════ */
+
+    @Transactional
+    public int claimGuestOrders(String email, Long userId, String tenantId) {
+        if (email == null || email.isBlank() || userId == null || tenantId == null) {
+            return 0;
+        }
+        List<Order> guests = orderRepository
+                .findByTenantIdAndCustomerEmailIgnoreCaseAndUserIdIsNull(tenantId, email);
+        if (guests.isEmpty()) return 0;
+        for (Order o : guests) {
+            o.setUserId(userId);
+            if (o.getPlacedById() == null) {
+                o.setPlacedById(userId);
+            }
+        }
+        orderRepository.saveAll(guests);
+        log.info("[OrderService] Claimed {} guest order(s) for user {} at tenant {}",
+                guests.size(), userId, tenantId);
+        return guests.size();
+    }
+
+    @Transactional(readOnly = true)
+    public long countClaimableOrders(String email, String tenantId) {
+        if (email == null || email.isBlank() || tenantId == null) return 0;
+        return orderRepository
+                .countByTenantIdAndCustomerEmailIgnoreCaseAndUserIdIsNull(tenantId, email);
     }
 
     /* ═══════════════ QUERIES ═══════════════ */
@@ -377,15 +415,27 @@ public class OrderService {
         if ("cancelled".equals(order.getStatus()) || "fulfilled".equals(order.getStatus())) {
             throw new ApiException("Cannot cancel this order", HttpStatus.UNPROCESSABLE_ENTITY);
         }
-        order.setStatus("cancelled");
+                order.setStatus("cancelled");
         orderRepository.save(order);
+
+        /* ─── Restore stock for all items ─── */
+        List<OrderItem> cancelledItems = orderItemRepository.findByOrderId(order.getId());
+        for (OrderItem item : cancelledItems) {
+            try {
+                restoreItemStock(tenantId, item, callerRole);
+            } catch (Exception e) {
+                log.warn("[OrderService] Stock restore failed for product {}: {}",
+                        item.getProductId(), e.getMessage());
+            }
+        }
+
         notificationService.createForUser(
-    order.getUserId(),
-    "order",
-    "Order cancelled",
-    "Order " + order.getId() + " has been cancelled.",
-    "/my-orders"
-);
+                order.getUserId(),
+                "order",
+                "Order cancelled",
+                "Order " + order.getId() + " has been cancelled.",
+                "/my-orders"
+        );
         return orderMapper.toDto(order, orderItemRepository.findByOrderId(order.getId()));
     }
 
@@ -578,22 +628,15 @@ notificationService.createForUser(
         }
     }
 
-    private int getVariantStock(Product p, String size, String color) {
-        if (p.getVariants() == null || p.getVariants().isBlank()) {
-            return p.getTotalStock() == null ? 0 : p.getTotalStock();
-        }
-        try {
-            String key = (size == null ? "_" : size) + "-" + (color == null ? "_" : color);
-            Map<String, Map<String, Object>> variants = objectMapper.readValue(
-                    p.getVariants(), new com.fasterxml.jackson.core.type.TypeReference<>() {});
-            Map<String, Object> v = variants.get(key);
-            if (v == null) return 0;
-            Object s = v.get("stock");
-            if (s instanceof Number n) return n.intValue();
-            return 0;
-        } catch (Exception e) {
-            return 0;
-        }
+        private int getVariantStock(Product p, String size, String color) {
+        String cleanSize  = (size  == null || size.isBlank())  ? null : size.trim();
+        String cleanColor = (color == null || color.isBlank()) ? null : color.trim();
+
+        var variant = productVariantRepository
+                .findByProductIdAndSizeAndColor(p.getId(), cleanSize, cleanColor);
+        if (variant.isEmpty()) return 0;
+        Integer stock = variant.get().getStock();
+        return stock == null ? 0 : stock;
     }
 
     private String generateOrderId() {
@@ -647,6 +690,88 @@ notificationService.createForUser(
             System.err.println("[OrderService] Could not link gift " + giftId
                     + " to order " + orderId + ": " + e.getMessage());
         }
+    }
+
+    /* ─── Stock deduction / restoration ─── */
+
+    private void deductItemStock(String tenantId, OrderItem item, Long userId,
+                                 String userName, String userRole, String orderId) {
+        String size = blankToNull(item.getSize());
+        String color = blankToNull(item.getColor());
+
+        ProductVariant variant = productVariantRepository
+                .findByProductIdAndSizeAndColor(item.getProductId(), size, color)
+                .orElseThrow(() -> new ApiException(
+                        "Variant not found: " + item.getName(),
+                        HttpStatus.CONFLICT));
+
+        int prev = variant.getStock() == null ? 0 : variant.getStock();
+        int next = prev - item.getQty();
+        if (next < 0) {
+            throw new ApiException(
+                    "Not enough stock for " + item.getName() + " — only " + prev + " left",
+                    HttpStatus.CONFLICT);
+        }
+
+        variant.setStock(next);
+        productVariantRepository.save(variant);
+
+        /* Update product.totalStock */
+        recalcProductTotal(item.getProductId());
+
+        /* Audit trail */
+        stockMovementService.record(
+                tenantId, item.getProductId(), variant.getId(),
+                -item.getQty(), prev, next,
+                "sale", orderId,
+                "Order placed: " + item.getName(),
+                userId, userName, userRole
+        );
+    }
+
+    private void restoreItemStock(String tenantId, OrderItem item, String callerRole) {
+        String size = blankToNull(item.getSize());
+        String color = blankToNull(item.getColor());
+
+        ProductVariant variant = productVariantRepository
+                .findByProductIdAndSizeAndColor(item.getProductId(), size, color)
+                .orElse(null);
+        if (variant == null) {
+            log.warn("[OrderService] Variant not found for restore: {} ({}/{})",
+                    item.getName(), size, color);
+            return;
+        }
+
+        int prev = variant.getStock() == null ? 0 : variant.getStock();
+        int next = prev + item.getQty();
+
+        variant.setStock(next);
+        productVariantRepository.save(variant);
+        recalcProductTotal(item.getProductId());
+
+        stockMovementService.record(
+                tenantId, item.getProductId(), variant.getId(),
+                item.getQty(), prev, next,
+                "return", null,
+                "Order cancelled: " + item.getName(),
+                null, "System", callerRole
+        );
+    }
+
+    private void recalcProductTotal(Long productId) {
+        List<ProductVariant> allVariants = productVariantRepository
+                .findByProductIdOrderBySizeAscColorAsc(productId);
+        int total = allVariants.stream()
+                .mapToInt(v -> v.getStock() == null ? 0 : v.getStock())
+                .sum();
+        productRepository.findById(productId).ifPresent(p -> {
+            p.setTotalStock(total);
+            productRepository.save(p);
+        });
+    }
+
+    private static String blankToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
     }
 
     /* ─── New private helpers ─── */

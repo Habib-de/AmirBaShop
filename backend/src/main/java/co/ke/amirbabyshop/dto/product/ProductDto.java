@@ -7,12 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 
-/**
- * Full product shape — used on the product detail page.
- * Includes parsed JSON fields (sizes, colors, variants).
- */
 @Data
 @Builder
 @NoArgsConstructor
@@ -32,6 +27,6 @@ public class ProductDto {
     private Integer totalStock;
     private List<String> sizes;
     private List<String> colors;
-    private Map<String, Map<String, Object>> variants;
+    private List<ProductVariantDto> variants;   // ← CHANGED: List, not Map
     private Boolean isActive;
 }

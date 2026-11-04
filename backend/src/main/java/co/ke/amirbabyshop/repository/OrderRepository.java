@@ -24,4 +24,10 @@ public interface OrderRepository extends JpaRepository<Order, String> {
     long countByTenantIdAndStatus(String tenantId, String status); 
     
     Optional<Order> findByMpesaCheckoutRequestId(String checkoutRequestId);
+    /* ─── Guest order claim ─── */
+    List<Order> findByTenantIdAndCustomerEmailIgnoreCaseAndUserIdIsNull(
+            String tenantId, String email);
+
+    long countByTenantIdAndCustomerEmailIgnoreCaseAndUserIdIsNull(
+            String tenantId, String email);
 }

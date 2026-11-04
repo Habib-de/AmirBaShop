@@ -39,6 +39,7 @@ public class AuthService {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final OrderService orderService;
 
     /* ═══════════════ REGISTER ═══════════════ */
 
@@ -100,6 +101,16 @@ public class AuthService {
                 .build();
 
         userRepository.save(user);
+
+        /* ─── Auto-claim any guest orders placed with this email ─── */
+        if ("customer".equals(role) && user.getId() != null) {
+            try {
+                orderService.claimGuestOrders(email, user.getId(), tenantId);
+            } catch (Exception e) {
+                /* Non-fatal — a failed claim shouldn't block registration */
+                System.err.println("[AuthService] Guest order claim failed for " + email + ": " + e.getMessage());
+            }
+        }
 
         boolean requiresApproval = "pending".equals(status);
         UserPrincipal principal = new UserPrincipal(user);

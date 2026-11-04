@@ -155,17 +155,19 @@ export default function ProductPage() {
   const currentVariantStock = getVariantStock(product, size, color);
   const isCurrentVariantSoldOut = currentVariantStock === 0;
 
-  /* ─── Size availability filtered by the selected colour ─── */
+    /* ─── Size availability filtered by the selected colour ─── */
+  const hasVariants = Array.isArray(product.variants) && product.variants.length > 0;
+
   const isSizeAvailable = (s) => {
-    if (!product.variants) return true;
+    if (!hasVariants) return true;
     if (color) return getVariantStock(product, s, color) > 0;
-    const colors = product.colors?.length ? product.colors : ['_'];
+    const colors = product.colors?.length ? product.colors : [null];
     return colors.some(c => getVariantStock(product, s, c) > 0);
   };
 
   const isColorAvailable = (c) => {
-    if (!product.variants) return true;
-    const sizes = product.sizes?.length ? product.sizes : ['_'];
+    if (!hasVariants) return true;
+    const sizes = product.sizes?.length ? product.sizes : [null];
     return sizes.some(s => getVariantStock(product, s, c) > 0);
   };
 

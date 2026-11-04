@@ -7,7 +7,6 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 
 @Data
 public class CreateProductRequest {
@@ -36,13 +35,23 @@ public class CreateProductRequest {
 
     private List<String> colors;
 
-    /**
+        /**
      * Optional — stock per size/colour, e.g.
-     * {"0-3M-Pink": {"stock": 5}, "3-6M-Blue": {"stock": 8}}
-     * Key format is "{size}-{colour}", with "_" for a missing size/colour.
+     * [
+     *   { "size": "0-3M", "color": "Pink", "stock": 5 },
+     *   { "size": "3-6M", "color": "Blue", "stock": 8, "imageUrl": "..." }
+     * ]
      * When present, totalStock is calculated from it.
      */
-    private Map<String, Map<String, Object>> variants;
+    private List<VariantInput> variants;
+
+    @Data
+    public static class VariantInput {
+        private String size;
+        private String color;
+        private Integer stock;
+        private String imageUrl;
+    }
 
     /**
      * Only used when `variants` is omitted: stock is split evenly

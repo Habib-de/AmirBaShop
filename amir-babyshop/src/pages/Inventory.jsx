@@ -6,8 +6,7 @@ import { useMemo, useState, useEffect } from 'react';
 import {
   useInventory,
   getTotalStock,
-  parseVariantKey,
-  variantKey,
+  findVariant,
 } from '../context/InventoryContext';
 import { useAuth } from '../context/AuthContext';
 import { useExtras } from '../context/ExtrasContext';
@@ -18,9 +17,6 @@ import { useDelayedReady } from '../hooks/useDelayedReady';
 import toast from 'react-hot-toast';
 import CloudinaryUpload from '../components/UI/CloudinaryUpload';
 
-/* ═══════════════════════════════════════════════════════════
-   LOCAL CACHE of categories for the Add Stock form
-   ═══════════════════════════════════════════════════════════ */
 let CATEGORIES_CACHE = [];
 
 export default function Inventory() {
@@ -50,7 +46,6 @@ export default function Inventory() {
 
   const ready = useDelayedReady(400);
 
-  /* ═══ Load categories once ═══ */
   const loadCategories = async () => {
     setCategoriesLoading(true);
     try {
@@ -68,9 +63,7 @@ export default function Inventory() {
   };
 
   useEffect(() => {
-    if (isOwner || isSales) {
-      loadCategories();
-    }
+    if (isOwner || isSales) loadCategories();
   }, [isOwner, isSales]);
 
   const filtered = useMemo(() => {
@@ -106,7 +99,6 @@ export default function Inventory() {
     try {
       await updateVariantStock(product.id, size, color, newStock);
     } catch (err) {
-      // Context already rolled back the optimistic update
       toast.error(err?.message || 'Failed to update stock');
       return;
     }
@@ -191,7 +183,6 @@ export default function Inventory() {
         )}
       </div>
 
-      {/* LOAD ERROR (no more silent empty lists) */}
       {error && (
         <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between gap-3">
           <p className="text-xs font-bold text-rose-700">⚠️ {error}</p>
@@ -205,7 +196,6 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* CATEGORIES MODAL */}
       {showCategories && (
         <CategoriesModal
           categories={categories}
@@ -215,7 +205,6 @@ export default function Inventory() {
         />
       )}
 
-      {/* ADD STOCK FORM */}
       {showForm && (
         <ProductForm
           mode="add"
@@ -225,7 +214,6 @@ export default function Inventory() {
         />
       )}
 
-      {/* EDIT PRODUCT MODAL */}
       {editing && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setEditing(null)} />
@@ -271,7 +259,6 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* LOW STOCK ALERT */}
       {ready && lowStock.length > 0 && (
         <div className="flex items-start gap-3 p-3 sm:p-4 rounded-xl border-l-4 border-amber-300 bg-amber-50">
           <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
@@ -334,17 +321,16 @@ export default function Inventory() {
               const totalStock = getTotalStock(p);
               const status = getStatus(totalStock);
               const isOpen = expanded === p.id;
-              const hasVariants = p.variants && Object.keys(p.variants).length > 0;
-              const variantCount = hasVariants ? Object.keys(p.variants).length : 0;
-              const outOfStockVariants = hasVariants
-                ? Object.values(p.variants).filter(v => (v.stock || 0) === 0).length
-                : 0;
+
+              /* ─── NEW: variants is an ARRAY now ─── */
+              const variantsArray = Array.isArray(p.variants) ? p.variants : [];
+              const hasVariants = variantsArray.length > 0;
+              const variantCount = variantsArray.length;
+              const outOfStockVariants = variantsArray.filter(v => (v.stock || 0) === 0).length;
 
               const totalWaiting = hasVariants
-                ? Object.keys(p.variants).reduce((sum, key) => {
-                    const { size, color } = parseVariantKey(p, key);
-                    return sum + getSubscribersForVariant(p.id, size, color);
-                  }, 0)
+                ? variantsArray.reduce((sum, v) =>
+                    sum + getSubscribersForVariant(p.id, v.size, v.color), 0)
                 : 0;
 
               return (
@@ -437,11 +423,10 @@ export default function Inventory() {
                             <p className="text-[9px] text-gray-400">Click − / + to adjust</p>
                           </div>
                           <div className="space-y-2">
-                            {Object.entries(p.variants).map(([key, variant]) => {
-                              const { size: displaySize, color: displayColor } = parseVariantKey(p, key);
-                              const label = [displaySize, displayColor].filter(Boolean).join(' · ');
+                            {variantsArray.map((variant) => {
+                              const label = variant.label || [variant.size, variant.color].filter(Boolean).join(' · ') || 'Standard';
                               const stock = variant.stock || 0;
-                              const waitingCount = getSubscribersForVariant(p.id, displaySize, displayColor);
+                              const waitingCount = getSubscribersForVariant(p.id, variant.size, variant.color);
 
                               const variantStatus = stock === 0
                                 ? 'bg-rose-50 border-rose-100'
@@ -456,10 +441,10 @@ export default function Inventory() {
                                 : 'text-emerald-700';
 
                               return (
-                                <div key={key} className={`flex items-center gap-2 p-2 rounded-lg border ${variantStatus}`}>
-                                  {variant.image && (
+                                <div key={variant.id || `${variant.size}-${variant.color}`} className={`flex items-center gap-2 p-2 rounded-lg border ${variantStatus}`}>
+                                  {variant.imageUrl && (
                                     <img
-                                      src={variant.image}
+                                      src={variant.imageUrl}
                                       alt={label}
                                       className="w-9 h-9 rounded-md object-cover border border-white shrink-0"
                                       onError={(e) => { e.currentTarget.style.display = 'none'; }}
@@ -467,7 +452,7 @@ export default function Inventory() {
                                   )}
                                   <div className="min-w-0 flex-1">
                                     <p className={`text-xs font-bold truncate ${textColor}`}>
-                                      {label || 'Standard'}
+                                      {label}
                                       {stock === 0 && (
                                         <span className="ml-1.5 text-[9px] uppercase tracking-wider">
                                           · Sold out
@@ -482,7 +467,7 @@ export default function Inventory() {
                                   </div>
                                   <div className="flex items-center gap-1 shrink-0">
                                     <button
-                                      onClick={() => handleVariantChange(p, displaySize, displayColor, stock, stock - 1)}
+                                      onClick={() => handleVariantChange(p, variant.size, variant.color, stock, stock - 1)}
                                       disabled={stock === 0}
                                       className="w-7 h-7 rounded-md bg-white hover:bg-gray-100 border border-gray-200 font-bold text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
@@ -494,12 +479,12 @@ export default function Inventory() {
                                       value={stock}
                                       onChange={(e) => {
                                         const newVal = parseInt(e.target.value) || 0;
-                                        handleVariantChange(p, displaySize, displayColor, stock, newVal);
+                                        handleVariantChange(p, variant.size, variant.color, stock, newVal);
                                       }}
                                       className="w-14 text-center text-xs font-bold bg-white border border-gray-200 rounded-md py-1 focus:outline-none focus:border-amir-pink"
                                     />
                                     <button
-                                      onClick={() => handleVariantChange(p, displaySize, displayColor, stock, stock + 1)}
+                                      onClick={() => handleVariantChange(p, variant.size, variant.color, stock, stock + 1)}
                                       className="w-7 h-7 rounded-md bg-white hover:bg-gray-100 border border-gray-200 font-bold text-xs transition-colors"
                                     >
                                       +
@@ -562,7 +547,7 @@ export default function Inventory() {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   CATEGORIES MODAL
+   CATEGORIES MODAL (unchanged)
    ═══════════════════════════════════════════════════════════ */
 function CategoriesModal({ categories, loading, onClose, onChanged }) {
   const [name, setName] = useState('');
@@ -634,7 +619,6 @@ function CategoriesModal({ categories, loading, onClose, onChanged }) {
 
         <div className="p-4 space-y-3">
 
-          {/* Existing categories */}
           {loading ? (
             <div className="p-8 text-center">
               <Loader2 size={24} className="mx-auto text-amir-pink animate-spin mb-2" />
@@ -674,7 +658,6 @@ function CategoriesModal({ categories, loading, onClose, onChanged }) {
             </div>
           )}
 
-          {/* Create form */}
           <form onSubmit={handleCreate} className="pt-3 border-t border-amir-dark/5 space-y-2">
             <p className="text-[10px] font-bold uppercase tracking-wider text-amir-dark/60">
               Add new category
@@ -723,24 +706,24 @@ function CategoriesModal({ categories, loading, onClose, onChanged }) {
 
 /* ═══════════════════════════════════════════════════════════
    PRODUCT FORM — used for both "Add stock" and "Edit product"
-   Stock is entered per size × colour (not split evenly).
+   Emits variants as an ARRAY (matching new backend shape)
    ═══════════════════════════════════════════════════════════ */
 const splitList = (str) =>
   [...new Set(String(str || '').split(',').map(s => s.trim()).filter(Boolean))];
+
+const comboKey = (size, color) => `${size || '_'}-${color || '_'}`;
 
 const buildCombos = (sizes, colors) => {
   const rows = sizes.length ? sizes : [null];
   const cols = colors.length ? colors : [null];
   return rows.flatMap(size =>
-    cols.map(color => ({ size, color, key: variantKey(size, color) }))
+    cols.map(color => ({ size, color, key: comboKey(size, color) }))
   );
 };
 
 const FIELD =
   'w-full px-4 py-2.5 rounded-lg border border-gray-200 focus:border-amir-pink focus:ring-2 focus:ring-amir-pink/30 outline-none text-sm font-semibold';
-  /* ═══════════════════════════════════════════════════════════
-   IMAGE PICKER — toggle between upload and paste URL
-   ═══════════════════════════════════════════════════════════ */
+
 function ImagePicker({ value, onChange, label = 'Image', disabled = false }) {
   const [mode, setMode] = useState(value ? 'url' : 'upload');
 
@@ -779,15 +762,15 @@ function ImagePicker({ value, onChange, label = 'Image', disabled = false }) {
           label={value ? 'Change image' : `Upload ${label.toLowerCase()}`}
         />
       ) : (
-  <input
-    type="url"
-    className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-amir-pink focus:ring-2 focus:ring-amir-pink/30 outline-none text-xs font-semibold"
-    placeholder="https://..."
-    value={value}
-    onChange={(e) => onChange(e.target.value)}
-    disabled={disabled}
-  />
-)}
+        <input
+          type="url"
+          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-amir-pink focus:ring-2 focus:ring-amir-pink/30 outline-none text-xs font-semibold"
+          placeholder="https://..."
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+        />
+      )}
 
       {value && (
         <div className="flex items-center gap-2">
@@ -815,37 +798,43 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
   const isEdit = mode === 'edit';
 
   const [form, setForm] = useState(() => ({
-  name: product?.name || '',
-  categoryId: product?.categoryId || categories[0]?.id || '',
-  price: product?.price != null ? String(product.price) : '',
-  originalPrice: product?.originalPrice != null ? String(product.originalPrice) : '',
-  image: product?.image || '',
-  description: product?.description || '',
-  badge: product?.badge || '',
-  sizes: (product?.sizes || []).join(', '),
-  colors: (product?.colors || []).join(', '),
-  singleStock: product ? String(product.stock ?? 0) : '',
-}));
+    name: product?.name || '',
+    categoryId: product?.categoryId || categories[0]?.id || '',
+    price: product?.price != null ? String(product.price) : '',
+    originalPrice: product?.originalPrice != null ? String(product.originalPrice) : '',
+    image: product?.image || '',
+    description: product?.description || '',
+    badge: product?.badge || '',
+    sizes: (product?.sizes || []).join(', '),
+    colors: (product?.colors || []).join(', '),
+    singleStock: product ? String(product.stock ?? 0) : '',
+  }));
 
-  // qty[variantKey] = "5"  — kept in state so values survive while you edit the size/colour lists
+  /* qty[comboKey] = "5" — survives edits to size/color list */
   const [qty, setQty] = useState(() => {
     const q = {};
-    Object.entries(product?.variants || {}).forEach(([k, v]) => {
-      q[k] = String(v?.stock ?? 0);
+    const arr = Array.isArray(product?.variants) ? product.variants : [];
+    arr.forEach(v => {
+      const k = comboKey(v.size, v.color);
+      q[k] = String(v.stock ?? 0);
     });
     return q;
   });
-  // imgs[variantKey] = image URL for that exact size+colour
+
+  /* imgs[comboKey] = image URL for that exact size+color */
   const [imgs, setImgs] = useState(() => {
     const m = {};
-    Object.entries(product?.variants || {}).forEach(([k, v]) => {
-      if (v?.image) m[k] = v.image;
+    const arr = Array.isArray(product?.variants) ? product.variants : [];
+    arr.forEach(v => {
+      if (v.imageUrl) {
+        m[comboKey(v.size, v.color)] = v.imageUrl;
+      }
     });
     return m;
   });
+
   const [submitting, setSubmitting] = useState(false);
 
-  // Categories load asynchronously — pick the first one once they arrive
   useEffect(() => {
     if (!form.categoryId && categories.length > 0) {
       setForm(f => ({ ...f, categoryId: categories[0].id }));
@@ -856,7 +845,7 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
   const colors = useMemo(() => splitList(form.colors), [form.colors]);
   const useVariants = sizes.length > 0 || colors.length > 0;
   const combos = useMemo(() => buildCombos(sizes, colors), [sizes, colors]);
-  // One photo per colour: fills every size of that colour (you can still override per size)
+
   const setColorImage = (color, url) =>
     setImgs(m => {
       const next = { ...m };
@@ -874,42 +863,39 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
       return;
     }
 
-    let variants;
+    /* ─── Emit variants as ARRAY (new shape) ─── */
+    let variants = null;
     let stock;
     if (useVariants) {
-      variants = {};
-      combos.forEach(c => {
-        const entry = { stock: Math.max(0, parseInt(qty[c.key]) || 0) };
-        const img = (imgs[c.key] || '').trim();
-        if (img) entry.image = img;
-        variants[c.key] = entry;
-      });
+      variants = combos.map(c => ({
+        size: c.size || null,
+        color: c.color || null,
+        stock: Math.max(0, parseInt(qty[c.key]) || 0),
+        imageUrl: (imgs[c.key] || '').trim() || null,
+      }));
       stock = variantTotal;
     } else {
-      variants = null;
       stock = Math.max(0, parseInt(form.singleStock) || 0);
     }
 
     const payload = {
-  name: form.name.trim(),
-  category: selectedCategory.slug,
-  categoryId: selectedCategory.id,
-  price: parseFloat(form.price) || 0,
-  originalPrice: form.originalPrice ? parseFloat(form.originalPrice) : null,
-  badge: form.badge.trim() || null,
-  stock,
-  image:
-    form.image.trim() ||
-    'https://images.unsplash.com/photo-1522771930-78848d9293e8?w=600',
-  description: form.description.trim(),
-  sizes: isEdit ? sizes : (sizes.length ? sizes : undefined),
-  colors: isEdit ? colors : (colors.length ? colors : undefined),
-  variants: isEdit ? variants : (variants || undefined),
-};
+      name: form.name.trim(),
+      category: selectedCategory.slug,
+      categoryId: selectedCategory.id,
+      price: parseFloat(form.price) || 0,
+      originalPrice: form.originalPrice ? parseFloat(form.originalPrice) : null,
+      badge: form.badge.trim() || null,
+      stock,
+      image:
+        form.image.trim() ||
+        'https://images.unsplash.com/photo-1522771930-78848d9293e8?w=600',
+      description: form.description.trim(),
+      sizes: sizes.length ? sizes : null,
+      colors: colors.length ? colors : null,
+      variants,
+    };
 
     if (!isEdit) {
-      payload.rating = 5;
-      payload.reviews = 0;
       payload.sku = `${(selectedCategory.slug || 'PRD').slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`;
     }
 
@@ -978,27 +964,27 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
         </select>
 
         <input
-  required
-  type="number"
-  step="0.01"
-  min="0"
-  className={FIELD}
-  placeholder="Price (KES) *"
-  value={form.price}
-  onChange={e => setForm({ ...form, price: e.target.value })}
-  disabled={submitting}
-/>
+          required
+          type="number"
+          step="0.01"
+          min="0"
+          className={FIELD}
+          placeholder="Price (KES) *"
+          value={form.price}
+          onChange={e => setForm({ ...form, price: e.target.value })}
+          disabled={submitting}
+        />
 
-<input
-  type="number"
-  step="0.01"
-  min="0"
-  className={FIELD}
-  placeholder="Original price (optional — for discount)"
-  value={form.originalPrice}
-  onChange={e => setForm({ ...form, originalPrice: e.target.value })}
-  disabled={submitting}
-/>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          className={FIELD}
+          placeholder="Original price (optional — for discount)"
+          value={form.originalPrice}
+          onChange={e => setForm({ ...form, originalPrice: e.target.value })}
+          disabled={submitting}
+        />
 
         <input
           className={FIELD}
@@ -1015,7 +1001,6 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
           disabled={submitting}
         />
 
-        {/* STOCK — per size × colour, or a single number */}
         {useVariants ? (
           <div className="sm:col-span-2 bg-gray-50 rounded-lg border border-gray-200 p-3">
             <div className="flex items-center justify-between mb-2">
@@ -1035,13 +1020,13 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
                     <div key={color} className="flex items-center gap-2">
                       <span className="w-20 shrink-0 text-xs font-bold text-gray-700 truncate">{color}</span>
                       <div className="flex-1 min-w-0">
-  <ImagePicker
-    label={`${color} photo`}
-    value={imgs[first?.key] || ''}
-    onChange={(url) => setColorImage(color, url)}
-    disabled={submitting}
-  />
-</div>
+                        <ImagePicker
+                          label={`${color} photo`}
+                          value={imgs[first?.key] || ''}
+                          onChange={(url) => setColorImage(color, url)}
+                          disabled={submitting}
+                        />
+                      </div>
                     </div>
                   );
                 })}
@@ -1052,10 +1037,7 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
               {combos.map(c => {
                 const label = [c.size, c.color].filter(Boolean).join(' · ');
                 return (
-                  <div
-                    key={c.key}
-                    className="bg-white border border-gray-200 rounded-lg p-2 space-y-1.5"
-                  >
+                  <div key={c.key} className="bg-white border border-gray-200 rounded-lg p-2 space-y-1.5">
                     <div className="flex items-center gap-2">
                       {imgs[c.key] && (
                         <img
@@ -1066,7 +1048,7 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
                         />
                       )}
                       <span className="flex-1 min-w-0 text-xs font-bold text-gray-700 truncate">
-                        {label}
+                        {label || 'Standard'}
                       </span>
                       <input
                         type="number"
@@ -1080,11 +1062,11 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
                       />
                     </div>
                     <ImagePicker
-  label={`${label || 'variant'} photo`}
-  value={imgs[c.key] || ''}
-  onChange={(url) => setImgs(m => ({ ...m, [c.key]: url }))}
-  disabled={submitting}
-/>
+                      label={`${label || 'variant'} photo`}
+                      value={imgs[c.key] || ''}
+                      onChange={(url) => setImgs(m => ({ ...m, [c.key]: url }))}
+                      disabled={submitting}
+                    />
                   </div>
                 );
               })}
@@ -1104,21 +1086,21 @@ function ProductForm({ mode = 'add', product = null, categories = [], onSubmit, 
         )}
 
         <div className="sm:col-span-2">
-  <ImagePicker
-    label="Main product image"
-    value={form.image}
-    onChange={(url) => setForm({ ...form, image: url })}
-    disabled={submitting}
-  />
-</div>
+          <ImagePicker
+            label="Main product image"
+            value={form.image}
+            onChange={(url) => setForm({ ...form, image: url })}
+            disabled={submitting}
+          />
+        </div>
 
-<input
-  className={FIELD}
-  placeholder='Badge (optional — "New", "Best Seller", "Sale")'
-  value={form.badge}
-  onChange={e => setForm({ ...form, badge: e.target.value })}
-  disabled={submitting}
-/>
+        <input
+          className={FIELD}
+          placeholder='Badge (optional — "New", "Best Seller", "Sale")'
+          value={form.badge}
+          onChange={e => setForm({ ...form, badge: e.target.value })}
+          disabled={submitting}
+        />
 
         <textarea
           required

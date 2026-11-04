@@ -149,6 +149,7 @@ export default function Register() {
       setSuccess({
         requiresApproval: res.requiresApproval,
         role,
+        claimedCount: res.claimedCount ?? 0,
       });
     } catch (err) {
       setError(err?.message || 'Registration failed');
@@ -160,6 +161,7 @@ export default function Register() {
      ═══════════════════════════════════════════ */
   if (success) {
     const isPending = success.requiresApproval;
+    const claimedCount = success.claimedCount ?? 0;
 
     return (
       <div className="h-screen w-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 flex items-center justify-center p-3 fixed inset-0">
@@ -194,6 +196,20 @@ export default function Register() {
                   ? 'Your shop is ready! Sign in to start managing your store.'
                   : 'Welcome! You can now sign in and start shopping.'}
               </p>
+
+                            {claimedCount > 0 && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-5 text-left">
+                  <p className="text-xs font-bold text-emerald-800 mb-1 flex items-center gap-1.5">
+                    <CheckCircle2 size={14} className="shrink-0" />
+                    We found {claimedCount} past order{claimedCount !== 1 ? 's' : ''}!
+                  </p>
+                  <p className="text-[11px] text-emerald-700">
+                    {claimedCount === 1
+                      ? 'Your previous order is now linked to this account. View it in "My Orders" after signing in.'
+                      : `Your ${claimedCount} previous orders are now linked to this account. View them in "My Orders" after signing in.`}
+                  </p>
+                </div>
+              )}
 
               {isPending && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-5 text-left">

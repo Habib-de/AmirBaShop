@@ -6,15 +6,17 @@ import co.ke.amirbabyshop.common.exception.ResourceNotFoundException;
 import co.ke.amirbabyshop.common.response.PagedResponse;
 import co.ke.amirbabyshop.domain.Category;
 import co.ke.amirbabyshop.domain.Product;
+import co.ke.amirbabyshop.domain.ProductVariant;
 import co.ke.amirbabyshop.dto.product.CreateProductRequest;
 import co.ke.amirbabyshop.dto.product.ProductDto;
 import co.ke.amirbabyshop.mapper.ProductMapper;
 import co.ke.amirbabyshop.repository.CategoryRepository;
 import co.ke.amirbabyshop.repository.ProductRepository;
+import co.ke.amirbabyshop.repository.ProductVariantRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -23,32 +25,24 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProductService {
 
-    /** Variant key used for products that have no sizes and no colours. */
-    private static final String NO_VARIANT_KEY = "_-_";
-
-    private static final TypeReference<Map<String, Map<String, Object>>> VARIANTS_TYPE =
-            new TypeReference<Map<String, Map<String, Object>>>() {};
-
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
+    private final ProductVariantRepository variantRepository;
     private final ProductMapper mapper;
     private final ObjectMapper objectMapper;
     private final StockAlertService stockAlertService;
+    private final StockMovementService stockMovementService;
 
     /* ═══════════════ READ ═══════════════ */
 
-    /**
-     * Returns the FULL ProductDto (sizes, colors, variants) for every product,
-     * so the inventory and shop pages can show stock per size/colour.
-     */
     @Transactional(readOnly = true)
     public PagedResponse<ProductDto> list(String tenantId,
                                           Integer categoryId,
@@ -63,7 +57,7 @@ public class ProductService {
         } else {
             page = productRepository.findByTenantIdAndIsActiveTrue(tenantId, pageable);
         }
-        return PagedResponse.from(page.map(p -> mapper.toDto(p)));
+        return PagedResponse.from(page.map(mapper::toDto));
     }
 
     @Transactional(readOnly = true)
@@ -74,7 +68,8 @@ public class ProductService {
     /* ═══════════════ CREATE ═══════════════ */
 
     @Transactional
-    public ProductDto create(String tenantId, String role, CreateProductRequest req) {
+    public ProductDto create(String tenantId, String role, String callerName,
+                             CreateProductRequest req) {
         requireStaff(role);
 
         Category category = categoryRepository.findById(req.getCategoryId())
@@ -91,14 +86,6 @@ public class ProductService {
             sku = prefix + "-" + (System.currentTimeMillis() % 100000);
         }
 
-        // Per-variant stock from the form, or fall back to an even split
-        Map<String, Map<String, Object>> variants = sanitizeVariants(req.getVariants());
-        if (variants.isEmpty()) {
-            int requested = req.getTotalStock() == null ? 0 : Math.max(0, req.getTotalStock());
-            variants = buildEvenVariants(req.getSizes(), req.getColors(), requested);
-        }
-        int totalStock = sumStock(variants);
-
         Product product = Product.builder()
                 .tenantId(tenantId)
                 .categoryId(req.getCategoryId())
@@ -111,14 +98,39 @@ public class ProductService {
                 .badge(req.getBadge())
                 .ratingAvg(BigDecimal.ZERO)
                 .reviewCount(0)
-                .totalStock(totalStock)
+                .totalStock(0)
                 .sizes(toJson(req.getSizes()))
                 .colors(toJson(req.getColors()))
-                .variants(toJson(variants))
                 .isActive(true)
                 .build();
 
         productRepository.save(product);
+
+        /* ─── Build variants from request (or even split) ─── */
+        List<ProductVariant> variants = buildVariantsFromRequest(
+                product, req.getSizes(), req.getColors(),
+                req.getVariants(), req.getTotalStock());
+
+        if (!variants.isEmpty()) {
+            variantRepository.saveAll(variants);
+            int total = variants.stream().mapToInt(ProductVariant::getStock).sum();
+            product.setTotalStock(total);
+            productRepository.save(product);
+
+            /* Audit: initial stock for each variant */
+            for (ProductVariant v : variants) {
+                if (v.getStock() > 0) {
+                    stockMovementService.record(
+                            tenantId, product.getId(), v.getId(),
+                            0, v.getStock(), v.getStock(),
+                            "initial", null,
+                            "Initial stock at product creation",
+                            null, callerName, role
+                    );
+                }
+            }
+        }
+
         return mapper.toDto(product);
     }
 
@@ -182,46 +194,12 @@ public class ProductService {
             }
         }
 
-        /* ── sizes / colours ── */
+        /* sizes / colours */
         if (patch.containsKey("sizes")) {
             product.setSizes(toJson(toStringList(patch.get("sizes"))));
         }
         if (patch.containsKey("colors")) {
             product.setColors(toJson(toStringList(patch.get("colors"))));
-        }
-
-        /* ── stock: per-variant map wins; otherwise plain number ── */
-        boolean variantsHandled = false;
-
-        if (patch.containsKey("variants")) {
-            Map<String, Map<String, Object>> variants =
-                    sanitizeVariants(castVariants(patch.get("variants")));
-
-            if (variants.isEmpty()) {
-                // No sizes/colours → single stock number stored under "_-_"
-                int single = patch.containsKey("totalStock")
-                        ? toInt(patch.get("totalStock"))
-                        : (patch.containsKey("stock") ? toInt(patch.get("stock")) : product.getTotalStock());
-                variants = singleVariant(Math.max(0, single));
-            }
-            product.setVariants(toJson(variants));
-            product.setTotalStock(sumStock(variants));
-            variantsHandled = true;
-        }
-
-        if (!variantsHandled && (patch.containsKey("totalStock") || patch.containsKey("stock"))) {
-            Map<String, Map<String, Object>> current = readVariants(product);
-            boolean isSingle = current.isEmpty()
-                    || (current.size() == 1 && current.containsKey(NO_VARIANT_KEY));
-            if (!isSingle) {
-                throw new ApiException(
-                        "This product has sizes/colours — update stock per variant",
-                        HttpStatus.UNPROCESSABLE_ENTITY);
-            }
-            Object raw = patch.containsKey("totalStock") ? patch.get("totalStock") : patch.get("stock");
-            Map<String, Map<String, Object>> variants = singleVariant(Math.max(0, toInt(raw)));
-            product.setVariants(toJson(variants));
-            product.setTotalStock(sumStock(variants));
         }
 
         productRepository.save(product);
@@ -230,75 +208,78 @@ public class ProductService {
 
     /* ═══════════════ VARIANT STOCK ═══════════════ */
 
-        /** Set one variant's stock to an exact number. */
+    /** Set one variant's stock to an exact number. */
     @Transactional
-    public ProductDto setVariantStock(String tenantId, String role, Long id,
+    public ProductDto setVariantStock(String tenantId, String role, String callerName, Long id,
                                       String size, String color, int stock) {
         requireStaff(role);
         Product product = load(tenantId, id);
+        ProductVariant variant = findOrCreateVariant(product, size, color);
 
-        Map<String, Map<String, Object>> variants = readVariants(product);
-        String key = variantKey(size, color);
+        int previousStock = variant.getStock();
+        int safeStock = Math.max(0, stock);
+        variant.setStock(safeStock);
+        variantRepository.save(variant);
 
-        int previousStock = toInt(
-                variants.getOrDefault(key, new LinkedHashMap<>()).get("stock"));
+        recalcProductTotal(product);
 
-        Map<String, Object> entry = new LinkedHashMap<>(variants.getOrDefault(key, new LinkedHashMap<>()));
-        entry.put("stock", Math.max(0, stock));
-        variants.put(key, entry);
+        /* Audit */
+        stockMovementService.record(
+                tenantId, product.getId(), variant.getId(),
+                safeStock - previousStock, previousStock, safeStock,
+                "adjustment", null,
+                "Manual set to " + safeStock,
+                null, callerName, role
+        );
 
-        ProductDto dto = saveVariants(product, variants);
-
-        // 0 → positive = restock: notify subscribers
-        if (previousStock == 0 && stock > 0) {
+        /* Restock notification: 0 → positive */
+        if (previousStock == 0 && safeStock > 0) {
             try {
-                stockAlertService.notifyRestock(tenantId, id, size, color, product.getName());
+                stockAlertService.notifyRestock(tenantId, product.getId(), size, color, product.getName());
             } catch (Exception e) {
-                // Non-fatal — never fail a stock update because of notification errors
-                System.err.println("[ProductService] notifyRestock failed: " + e.getMessage());
+                log.warn("[ProductService] notifyRestock failed: {}", e.getMessage());
             }
         }
 
-        return dto;
+        return mapper.toDto(product);
     }
 
-        /** Add (positive delta) or remove (negative delta) units from one variant. */
+    /** Add (positive delta) or remove (negative delta) units from one variant. */
     @Transactional
-    public ProductDto adjustVariantStock(String tenantId, String role, Long id,
+    public ProductDto adjustVariantStock(String tenantId, String role, String callerName, Long id,
                                          String size, String color, int delta) {
         requireStaff(role);
         Product product = load(tenantId, id);
+        ProductVariant variant = variantRepository
+                .findByProductIdAndSizeAndColor(product.getId(), size, color)
+                .orElseThrow(() -> new ApiException("Variant not found", HttpStatus.NOT_FOUND));
 
-        Map<String, Map<String, Object>> variants = readVariants(product);
-        String key = variantKey(size, color);
-
-        Map<String, Object> existing = variants.get(key);
-        if (existing == null) {
-            throw new ApiException("Variant not found: " + key, HttpStatus.NOT_FOUND);
-        }
-
-        int previousStock = toInt(existing.get("stock"));
+        int previousStock = variant.getStock();
         int next = previousStock + delta;
         if (next < 0) {
-            throw new ApiException("Insufficient stock for " + key, HttpStatus.UNPROCESSABLE_ENTITY);
+            throw new ApiException("Insufficient stock", HttpStatus.UNPROCESSABLE_ENTITY);
         }
 
-        Map<String, Object> entry = new LinkedHashMap<>(existing);
-        entry.put("stock", next);
-        variants.put(key, entry);
+        variant.setStock(next);
+        variantRepository.save(variant);
+        recalcProductTotal(product);
 
-        ProductDto dto = saveVariants(product, variants);
+        stockMovementService.record(
+                tenantId, product.getId(), variant.getId(),
+                delta, previousStock, next,
+                delta > 0 ? "restock" : "adjustment", null,
+                null, null, callerName, role
+        );
 
-        // 0 → positive = restock: notify subscribers
         if (previousStock == 0 && next > 0) {
             try {
-                stockAlertService.notifyRestock(tenantId, id, size, color, product.getName());
+                stockAlertService.notifyRestock(tenantId, product.getId(), size, color, product.getName());
             } catch (Exception e) {
-                System.err.println("[ProductService] notifyRestock failed: " + e.getMessage());
+                log.warn("[ProductService] notifyRestock failed: {}", e.getMessage());
             }
         }
 
-        return dto;
+        return mapper.toDto(product);
     }
 
     /* ═══════════════ DELETE ═══════════════ */
@@ -322,105 +303,127 @@ public class ProductService {
         }
     }
 
-    /** Same format the frontend uses: "{size}-{color}" with "_" for blanks. */
-    private String variantKey(String size, String color) {
-        String s = (size == null || size.isBlank()) ? "_" : size.trim();
-        String c = (color == null || color.isBlank()) ? "_" : color.trim();
-        return s + "-" + c;
-    }
-
-    private ProductDto saveVariants(Product product, Map<String, Map<String, Object>> variants) {
-        product.setVariants(toJson(variants));
-        product.setTotalStock(sumStock(variants));
+    /** Sum all variant stocks and update product.totalStock. */
+    private void recalcProductTotal(Product product) {
+        List<ProductVariant> variants = variantRepository
+                .findByProductIdOrderBySizeAscColorAsc(product.getId());
+        int total = variants.stream().mapToInt(v -> v.getStock() == null ? 0 : v.getStock()).sum();
+        product.setTotalStock(total);
         productRepository.save(product);
-        return mapper.toDto(product);
     }
 
-    private Map<String, Map<String, Object>> readVariants(Product product) {
-        String json = product.getVariants();
-        if (json == null || json.isBlank()) return new LinkedHashMap<>();
-        try {
-            Map<String, Map<String, Object>> parsed = objectMapper.readValue(json, VARIANTS_TYPE);
-            return parsed == null ? new LinkedHashMap<>() : new LinkedHashMap<>(parsed);
-        } catch (Exception e) {
-            return new LinkedHashMap<>();
+    /** Find a variant, or create a placeholder one (used by setVariantStock). */
+    private ProductVariant findOrCreateVariant(Product product, String size, String color) {
+        return variantRepository
+                .findByProductIdAndSizeAndColor(product.getId(),
+                        blankToNull(size), blankToNull(color))
+                .orElseGet(() -> ProductVariant.builder()
+                        .product(product)
+                        .size(blankToNull(size))
+                        .color(blankToNull(color))
+                        .stock(0)
+                        .weightGrams(0)
+                        .lowStockThreshold(10)
+                        .isActive(true)
+                        .build());
+    }
+
+    /** Build variant rows from a create request. */
+        private List<ProductVariant> buildVariantsFromRequest(
+            Product product,
+            List<String> sizes,
+            List<String> colors,
+            List<CreateProductRequest.VariantInput> requestedVariants,
+            Integer fallbackTotalStock) {
+
+                List<ProductVariant> result = new ArrayList<>();
+
+        /* Case 1: explicit per-variant list supplied */
+        if (requestedVariants != null && !requestedVariants.isEmpty()) {
+            for (CreateProductRequest.VariantInput v : requestedVariants) {
+                int stock = v.getStock() == null ? 0 : Math.max(0, v.getStock());
+                result.add(ProductVariant.builder()
+                        .product(product)
+                        .size(blankToNull(v.getSize()))
+                        .color(blankToNull(v.getColor()))
+                        .stock(stock)
+                        .imageUrl(blankToNull(v.getImageUrl()))
+                        .weightGrams(0)
+                        .lowStockThreshold(10)
+                        .isActive(true)
+                        .build());
+            }
+            return result;
         }
-    }
 
-    private Map<String, Map<String, Object>> castVariants(Object raw) {
-        if (raw == null) return new LinkedHashMap<>();
-        try {
-            return objectMapper.convertValue(raw, VARIANTS_TYPE);
-        } catch (IllegalArgumentException e) {
-            throw new ApiException("Invalid variants", HttpStatus.UNPROCESSABLE_ENTITY);
-        }
-    }
-
-    /** Trims keys, forces stock to an int >= 0, drops blank keys. */
-    private Map<String, Map<String, Object>> sanitizeVariants(Map<String, Map<String, Object>> in) {
-        Map<String, Map<String, Object>> out = new LinkedHashMap<>();
-        if (in == null) return out;
-        for (Map.Entry<String, Map<String, Object>> e : in.entrySet()) {
-            if (e.getKey() == null || e.getKey().isBlank()) continue;
-            Map<String, Object> copy = new LinkedHashMap<>();
-            if (e.getValue() != null) copy.putAll(e.getValue());
-            copy.put("stock", Math.max(0, toInt(copy.get("stock"))));
-            out.put(e.getKey().trim(), copy);
-        }
-        return out;
-    }
-
-    private int sumStock(Map<String, Map<String, Object>> variants) {
-        int total = 0;
-        for (Map<String, Object> v : variants.values()) {
-            total += Math.max(0, toInt(v.get("stock")));
-        }
-        return total;
-    }
-
-    private Map<String, Map<String, Object>> singleVariant(int stock) {
-        Map<String, Map<String, Object>> m = new LinkedHashMap<>();
-        Map<String, Object> v = new LinkedHashMap<>();
-        v.put("stock", stock);
-        m.put(NO_VARIANT_KEY, v);
-        return m;
-    }
-
-    /** Even split across sizes × colours; any remainder goes to the first variants. */
-    private Map<String, Map<String, Object>> buildEvenVariants(List<String> sizes,
-                                                               List<String> colors,
-                                                               int totalStock) {
-        List<String> ss = (sizes == null || sizes.isEmpty()) ? List.of("_") : sizes;
-        List<String> cs = (colors == null || colors.isEmpty()) ? List.of("_") : colors;
+        /* Case 2: sizes/colors lists → even split */
+        List<String> ss = (sizes == null || sizes.isEmpty()) ? List.of((String) null) : sizes;
+        List<String> cs = (colors == null || colors.isEmpty()) ? List.of((String) null) : colors;
         int count = ss.size() * cs.size();
-        int base = count > 0 ? totalStock / count : 0;
-        int remainder = count > 0 ? totalStock % count : 0;
+        int total = fallbackTotalStock == null ? 0 : Math.max(0, fallbackTotalStock);
+        int base = count > 0 ? total / count : 0;
+        int remainder = count > 0 ? total % count : 0;
 
-        Map<String, Map<String, Object>> variants = new LinkedHashMap<>();
         int i = 0;
         for (String s : ss) {
             for (String c : cs) {
-                Map<String, Object> v = new LinkedHashMap<>();
-                v.put("stock", base + (i < remainder ? 1 : 0));
-                variants.put(s + "-" + c, v);
+                result.add(ProductVariant.builder()
+                        .product(product)
+                        .size(s)
+                        .color(c)
+                        .stock(base + (i < remainder ? 1 : 0))
+                        .weightGrams(0)
+                        .lowStockThreshold(10)
+                        .isActive(true)
+                        .build());
                 i++;
             }
         }
-        return variants;
+        return result;
     }
 
-    private int toInt(Object o) {
-        if (o == null) return 0;
-        if (o instanceof Number n) return n.intValue();
-        try {
-            return (int) Double.parseDouble(String.valueOf(o).trim());
-        } catch (NumberFormatException e) {
-            throw new ApiException("Invalid stock value", HttpStatus.UNPROCESSABLE_ENTITY);
+    /** Reverse of variantKey — matches known sizes longest-first. */
+    private SizeColor parseKey(Product product, String key, List<String> sizes, List<String> colors) {
+        if (key == null || key.isBlank()) return new SizeColor(null, null);
+
+        List<String> ss = sizes == null ? new ArrayList<>() : new ArrayList<>(sizes);
+        ss.sort((a, b) -> Integer.compare(b.length(), a.length()));
+
+        for (String size : ss) {
+            if (size != null && key.startsWith(size + "-")) {
+                String color = key.substring(size.length() + 1);
+                return new SizeColor(size, blankToNull(color));
+            }
         }
+
+        if (key.startsWith("_-")) {
+            return new SizeColor(null, blankToNull(key.substring(2)));
+        }
+        if (key.endsWith("-_")) {
+            return new SizeColor(blankToNull(key.substring(0, key.length() - 2)), null);
+        }
+        if ("_-_".equals(key)) return new SizeColor(null, null);
+
+        int idx = key.indexOf('-');
+        if (idx == -1) return new SizeColor(blankToNull(key), null);
+        return new SizeColor(
+                blankToNull(key.substring(0, idx)),
+                blankToNull(key.substring(idx + 1))
+        );
     }
 
-    private String strOrNull(Object o) {
-        return o == null ? null : String.valueOf(o);
+    /* ─── Type helpers ─── */
+    private static int toInt(Object o, int fallback) {
+        if (o == null) return fallback;
+        if (o instanceof Number n) return n.intValue();
+        try { return (int) Double.parseDouble(String.valueOf(o).trim()); }
+        catch (NumberFormatException e) { throw new ApiException("Invalid stock value", HttpStatus.UNPROCESSABLE_ENTITY); }
+    }
+
+    private String strOrNull(Object o) { return o == null ? null : String.valueOf(o); }
+
+    private static String blankToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
     }
 
     private List<String> toStringList(Object o) {
@@ -443,6 +446,15 @@ public class ProductService {
             return objectMapper.writeValueAsString(obj);
         } catch (JsonProcessingException e) {
             return null;
+        }
+    }
+
+    public static class SizeColor {
+        public final String size;
+        public final String color;
+        public SizeColor(String size, String color) {
+            this.size = size;
+            this.color = color;
         }
     }
 }

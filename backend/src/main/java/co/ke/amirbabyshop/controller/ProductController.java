@@ -71,7 +71,8 @@ public class ProductController {
     ) {
         requireAuth(principal);
         return ApiResponse.ok("Product created",
-                productService.create(principal.getTenantId(), principal.getRole(), req));
+                productService.create(principal.getTenantId(), principal.getRole(),
+                        principal.getName(), req));
     }
 
     @PatchMapping("/{id}")
@@ -120,7 +121,8 @@ public class ProductController {
     ) {
         requireAuth(principal);
         return ApiResponse.ok("Variant stock updated",
-                productService.setVariantStock(principal.getTenantId(), principal.getRole(), id,
+                productService.setVariantStock(principal.getTenantId(), principal.getRole(),
+                        principal.getName(), id,
                         req.getSize(), req.getColor(), req.getStock()));
     }
 
@@ -133,7 +135,8 @@ public class ProductController {
     ) {
         requireAuth(principal);
         return ApiResponse.ok("Variant stock deducted",
-                productService.adjustVariantStock(principal.getTenantId(), principal.getRole(), id,
+                productService.adjustVariantStock(principal.getTenantId(), principal.getRole(),
+                        principal.getName(), id,
                         req.getSize(), req.getColor(), -req.getQty()));
     }
 
@@ -146,7 +149,8 @@ public class ProductController {
     ) {
         requireAuth(principal);
         return ApiResponse.ok("Variant stock restored",
-                productService.adjustVariantStock(principal.getTenantId(), principal.getRole(), id,
+                productService.adjustVariantStock(principal.getTenantId(), principal.getRole(),
+                        principal.getName(), id,
                         req.getSize(), req.getColor(), req.getQty()));
     }
 

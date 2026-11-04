@@ -69,6 +69,40 @@ public class OrderController {
         return ApiResponse.ok(orderService.listForCustomer(principal.getUsername()));
     }
 
+        /* ═══════════════ CLAIM GUEST ORDERS (customer only) ═══════════════ */
+    /* Returns how many guest orders were reassigned to this user. */
+
+    @PostMapping("/claim")
+    public ApiResponse<Map<String, Object>> claimGuestOrders(
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        if (principal == null) throw new UnauthorizedException("Not authenticated");
+        int count = orderService.claimGuestOrders(
+                principal.getUsername(),
+                principal.getId(),
+                principal.getTenantId()
+        );
+        return ApiResponse.ok(
+                "Claimed " + count + " order" + (count != 1 ? "s" : ""),
+                Map.of("claimed", count)
+        );
+    }
+
+    /* ═══════════════ COUNT CLAIMABLE (customer only) ═══════════════ */
+    /* Returns how many guest orders are waiting to be claimed. */
+
+    @GetMapping("/claimable")
+    public ApiResponse<Map<String, Object>> countClaimable(
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        if (principal == null) throw new UnauthorizedException("Not authenticated");
+        long count = orderService.countClaimableOrders(
+                principal.getUsername(),
+                principal.getTenantId()
+        );
+        return ApiResponse.ok(Map.of("count", count));
+    }
+
      /* ═══════════════ PENDING COUNT (staff only — for nav badge) ═══════════════ */
 
     @GetMapping("/pending-count")

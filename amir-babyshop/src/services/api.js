@@ -462,6 +462,27 @@ function normalizeProduct(dto) {
     5: 'bath',
   };
 
+  // Backend returns `sizes` / `colors` as parsed arrays already (via ProductMapper),
+  // but keep parseJson for backward compat if raw JSON sneaks through.
+  const sizes  = Array.isArray(dto.sizes)  ? dto.sizes  : parseJson(dto.sizes, []);
+  const colors = Array.isArray(dto.colors) ? dto.colors : parseJson(dto.colors, []);
+
+  // Backend now returns `variants` as List<ProductVariantDto> (array of objects).
+  // Old shape was a Map keyed by "size-color". Handle both:
+  const rawVariants = Array.isArray(dto.variants)
+    ? dto.variants
+    : dto.variants && typeof dto.variants === 'object'
+      ? Object.entries(dto.variants).map(([key, v]) => ({
+          // Convert old map format to array format
+          id: null,
+          size: key.split('-')[0] === '_' ? null : key.split('-')[0],
+          color: key.split('-').slice(1).join('-') === '_' ? null : key.split('-').slice(1).join('-'),
+          stock: v?.stock || 0,
+          imageUrl: v?.image || '',
+          label: key,
+        }))
+      : [];
+
   return {
     id: dto.id,
     name: dto.name,
@@ -473,9 +494,9 @@ function normalizeProduct(dto) {
     badge: dto.badge,
     categoryId: dto.categoryId,
     category: CATEGORY_SLUGS[dto.categoryId] || 'other',
-    sizes: parseJson(dto.sizes, []),
-    colors: parseJson(dto.colors, []),
-    variants: parseJson(dto.variants, null),
+    sizes,
+    colors,
+    variants: rawVariants,      // ← now an array of { id, size, color, stock, imageUrl, label }
     rating: dto.ratingAvg ?? 0,
     reviews: dto.reviewCount ?? 0,
     stock: dto.totalStock ?? 0,
@@ -538,18 +559,34 @@ function normalizeOrder(dto) {
 
 export const variantKey = (size, color) => `${size || '_'}-${color || '_'}`;
 
+/** Find a variant by size+color. Returns the variant object or null. */
+export const findVariant = (product, size, color) => {
+  if (!product) return null;
+  const list = Array.isArray(product.variants) ? product.variants : [];
+  const s = size  || null;
+  const c = color || null;
+  return list.find(v =>
+    (v.size  || null) === s &&
+    (v.color || null) === c
+  ) || null;
+};
+
 export const getVariantStock = (product, size, color) => {
   if (!product) return 0;
-  if (!product.variants) return product.stock ?? 0;
-  const key = variantKey(size, color);
-  return product.variants[key]?.stock ?? 0;
+  if (!product.variants || (Array.isArray(product.variants) && product.variants.length === 0)) {
+    return product.stock ?? 0;
+  }
+  const v = findVariant(product, size, color);
+  return v?.stock ?? 0;
 };
 
 export const getTotalStock = (product) => {
   if (!product) return 0;
-  if (!product.variants) return product.stock ?? 0;
-  return Object.values(product.variants)
-    .reduce((sum, v) => sum + (v.stock || 0), 0);
+  if (!product.variants || (Array.isArray(product.variants) && product.variants.length === 0)) {
+    return product.stock ?? 0;
+  }
+  const list = Array.isArray(product.variants) ? product.variants : Object.values(product.variants);
+  return list.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
 };
 
 export const isVariantInStock = (product, size, color) =>
@@ -557,6 +594,20 @@ export const isVariantInStock = (product, size, color) =>
 
 export const isProductOutOfStock = (product) =>
   getTotalStock(product) === 0;
+
+/** Get the variant-level image, or fall back to product image. */
+export const getVariantImage = (product, size, color) => {
+  const v = findVariant(product, size, color);
+  return v?.imageUrl || product?.image || '';
+};
+
+/** Get the first image for a color across all sizes (variant image or product fallback). */
+export const getColorImage = (product, color) => {
+  if (!product) return '';
+  const list = Array.isArray(product.variants) ? product.variants : [];
+  const match = list.find(v => (v.color || null) === (color || null) && v.imageUrl);
+  return match?.imageUrl || product.image || '';
+};
 
 /* ─── Mock storage ─── */
 

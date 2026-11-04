@@ -9,7 +9,6 @@ import {
   getTotalStock,
   getVariantStock,
   getColorImage,
-  parseVariantKey,
 } from '../context/InventoryContext';
 import { useCart } from '../context/CartContext';
 import { categories } from '../data/products';
@@ -40,12 +39,13 @@ const EMPTY_FILTERS = {
 
 /** Units in stock for one colour (all sizes added together). */
 const colorStock = (product, color) => {
-  if (!product.variants) return product.stock ?? 0;
-  return Object.entries(product.variants).reduce((sum, [key, v]) => {
-    return parseVariantKey(product, key).color === color
-      ? sum + (v?.stock || 0)
-      : sum;
-  }, 0);
+  if (!product) return 0;
+  if (!Array.isArray(product.variants) || product.variants.length === 0) {
+    return product.stock ?? 0;
+  }
+  return product.variants
+    .filter(v => (v.color || null) === (color || null))
+    .reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
 };
 
 /** "Pink" → "pink", "Light Blue" → "lightblue". Returns null if the browser doesn't know it. */

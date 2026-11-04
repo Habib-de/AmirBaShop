@@ -5,6 +5,8 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "products")
@@ -61,8 +63,10 @@ public class Product {
     @Column(columnDefinition = "JSON")
     private String colors;
 
-    @Column(columnDefinition = "JSON")
-    private String variants;
+        /* ─── Variants (one row = one size × color combination) ─── */
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<ProductVariant> variants = new ArrayList<>();
 
     @Column(name = "is_active", columnDefinition = "TINYINT(1)")
     private Boolean isActive;

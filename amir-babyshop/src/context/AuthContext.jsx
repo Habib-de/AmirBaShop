@@ -144,16 +144,39 @@ export function AuthProvider({ children }) {
         body: { name, email, password, role, shopName, tenantId },
       });
 
-      // Pending accounts get no token — user must wait for approval
+            // Pending accounts get no token — user must wait for approval
       if (!res.requiresApproval) {
         tokenStore.set(res.accessToken, res.refreshToken);
         setUser(res.user);
+
+        /* Auto-claim any guest orders placed with this email.
+           The backend already tried on the register transaction, but this
+           catches anything that slipped through (or was placed between
+           register and now). Returns count so UI can show a toast. */
+        let claimedCount = 0;
+        try {
+          const claimRes = await callApi('/orders/claim', { method: 'POST', auth: true });
+          claimedCount = claimRes?.claimed ?? 0;
+          if (claimedCount > 0) {
+            console.log(`[Auth] Auto-claimed ${claimedCount} guest order(s) after register`);
+          }
+        } catch (err) {
+          console.warn('[Auth] Post-register claim failed:', err.message);
+        }
+
+        return {
+          ok: true,
+          user: res.user,
+          requiresApproval: false,
+          claimedCount,
+        };
       }
 
       return {
         ok: true,
         user: res.user,
         requiresApproval: res.requiresApproval,
+        claimedCount: 0,
       };
     } catch (err) {
       return { ok: false, error: err.message || 'Registration failed' };
@@ -191,6 +214,29 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  /* ═══ CLAIM GUEST ORDERS ═══ */
+  /* Called automatically on register success. Also available if frontend
+     wants to let users manually claim later. */
+  const claimGuestOrders = useCallback(async () => {
+    try {
+      const res = await callApi('/orders/claim', { method: 'POST', auth: true });
+      return { ok: true, claimed: res?.claimed ?? 0 };
+    } catch (err) {
+      return { ok: false, error: err.message || 'Claim failed', claimed: 0 };
+    }
+  }, []);
+
+  /* ═══ COUNT CLAIMABLE ═══ */
+  /* Used to show "You have N unclaimed orders" banner if needed. */
+  const countClaimableOrders = useCallback(async () => {
+    try {
+      const res = await callApi('/orders/claimable', { auth: true });
+      return { ok: true, count: res?.count ?? 0 };
+    } catch (err) {
+      return { ok: false, error: err.message || 'Count failed', count: 0 };
+    }
+  }, []);
+
   /* ═══ Legacy stubs — kept so Team.jsx etc. still compile ═══ */
   const approveUser = useCallback(() => {}, []);
   const rejectUser = useCallback(() => {}, []);
@@ -214,6 +260,7 @@ export function AuthProvider({ children }) {
       approveUser, rejectUser, deleteUser,
       updateUser, changePassword,
       getPendingUsers,
+      claimGuestOrders, countClaimableOrders,
       hasRole, isOwner, isSales, isCustomer, isStaff,
     }}>
       {children}
