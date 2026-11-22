@@ -30,7 +30,7 @@ AMIR BabyShop is a live e-commerce platform built for a baby shop in Mombasa, Ke
 
 <div align="center">
 
-<img src="assets/architecture.svg" alt="AMIR BabyShop architecture" width="100%" />
+<img src="amir-babyshop/src/assets/architecture.svg" alt="AMIR BabyShop architecture" width="100%" />
 
 </div>
 
